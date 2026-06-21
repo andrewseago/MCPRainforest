@@ -205,6 +205,7 @@ func (s *Server) setupRouter() (*gin.Engine, error) {
 		}
 		r.GET("/", s.requireInitialized(), requireDashboardMode, gin.WrapH(dashboardFileServer))
 		r.GET("/index.html", s.requireInitialized(), requireDashboardMode, gin.WrapH(dashboardFileServer))
+		r.GET("/favicon.svg", s.requireInitialized(), requireDashboardMode, gin.WrapH(dashboardFileServer))
 		r.GET("/assets/*filepath", s.requireInitialized(), requireDashboardMode, gin.WrapH(dashboardFileServer))
 	}
 

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import logoUrl from "@repo-assets/logo.png";
+import logoUrl from "@repo-assets/mcprainforest-logo.svg";
 import { api } from "@/lib/api";
 import type {
   AppSection,
@@ -440,6 +440,8 @@ function createInitialToolGroupForm(): ToolGroupFormState {
 }
 
 const themeModes: ThemeMode[] = ["light", "dark", "system"];
+const dashboardThemeKey = "mcprainforest-dashboard-theme";
+const legacyDashboardThemeKey = "mcpjungle-dashboard-theme";
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return value === "light" || value === "dark" || value === "system";
@@ -449,7 +451,7 @@ function initialThemeMode(): ThemeMode {
   if (typeof window === "undefined") {
     return "system";
   }
-  const stored = window.localStorage.getItem("mcpjungle-dashboard-theme");
+  const stored = window.localStorage.getItem(dashboardThemeKey) ?? window.localStorage.getItem(legacyDashboardThemeKey);
   return isThemeMode(stored) ? stored : "system";
 }
 
@@ -596,7 +598,8 @@ export default function App() {
     const applyTheme = () => {
       document.documentElement.dataset.theme = resolvedTheme(themeMode);
       document.documentElement.dataset.themeMode = themeMode;
-      window.localStorage.setItem("mcpjungle-dashboard-theme", themeMode);
+      window.localStorage.setItem(dashboardThemeKey, themeMode);
+      window.localStorage.removeItem(legacyDashboardThemeKey);
     };
 
     applyTheme();
@@ -976,7 +979,7 @@ export default function App() {
 
   async function deleteServer(server: DashboardServer) {
     const confirmed = window.confirm(
-      `Delete server "${server.name}"? This removes the registration and all discovered tools, prompts, and resources from MCPJungle.`,
+      `Delete server "${server.name}"? This removes the registration and all discovered tools, prompts, and resources from MCPRainforest.`,
     );
     if (!confirmed) {
       return;
@@ -1112,7 +1115,7 @@ export default function App() {
         {loadState === "loading" ? (
           <section className="loading-screen panel">
             <h2>Loading dashboard</h2>
-            <p>Querying local MCPJungle state, servers, tools, prompts, and resources.</p>
+            <p>Querying local MCPRainforest state, servers, tools, prompts, and resources.</p>
           </section>
         ) : null}
 

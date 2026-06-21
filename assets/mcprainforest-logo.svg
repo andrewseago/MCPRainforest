@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="220" fill="url(#rainforest-bg)"/>
+  <path d="M176 585C176 453.004 283.004 346 415 346H609C740.996 346 848 453.004 848 585V625H176V585Z" fill="url(#canopy-top)"/>
+  <path d="M238 681C238 565.02 332.02 471 448 471H576C691.98 471 786 565.02 786 681V704H238V681Z" fill="url(#canopy-mid)"/>
+  <path d="M309 759C309 676.157 376.157 609 459 609H565C647.843 609 715 676.157 715 759V774H309V759Z" fill="#0E4F35"/>
+  <path d="M310 705H714" stroke="#81F0B8" stroke-width="34" stroke-linecap="round"/>
+  <path d="M512 296V705" stroke="#E2FFE9" stroke-width="38" stroke-linecap="round"/>
+  <path d="M382 705V584C382 550.863 408.863 524 442 524H512" stroke="#E2FFE9" stroke-width="38" stroke-linecap="round"/>
+  <path d="M642 705V584C642 550.863 615.137 524 582 524H512" stroke="#E2FFE9" stroke-width="38" stroke-linecap="round"/>
+  <path d="M302 600C349.24 535.535 425.631 496 512 496C598.369 496 674.76 535.535 722 600" stroke="#22C878" stroke-width="22" stroke-linecap="round"/>
+  <path d="M386 425C420.43 386.23 464.051 364 512 364C559.949 364 603.57 386.23 638 425" stroke="#5FE09B" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="512" cy="296" r="45" fill="#D7FFE4" stroke="#0A3626" stroke-width="20"/>
+  <circle cx="382" cy="705" r="43" fill="#BDFCD5" stroke="#0A3626" stroke-width="20"/>
+  <circle cx="642" cy="705" r="43" fill="#BDFCD5" stroke="#0A3626" stroke-width="20"/>
+  <circle cx="512" cy="524" r="39" fill="#FFF0A7" stroke="#0A3626" stroke-width="18"/>
+  <defs>
+    <linearGradient id="rainforest-bg" x1="120" y1="70" x2="903" y2="954" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071713"/>
+      <stop offset="0.55" stop-color="#0A3326"/>
+      <stop offset="1" stop-color="#0D5A3B"/>
+    </linearGradient>
+    <linearGradient id="canopy-top" x1="176" y1="346" x2="848" y2="625" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B6A43"/>
+      <stop offset="0.5" stop-color="#18A765"/>
+      <stop offset="1" stop-color="#105E42"/>
+    </linearGradient>
+    <linearGradient id="canopy-mid" x1="238" y1="471" x2="786" y2="704" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15B96F"/>
+      <stop offset="0.53" stop-color="#2EE58F"/>
+      <stop offset="1" stop-color="#12965C"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -69,9 +69,9 @@ export function NavSidebar({
   return (
     <aside className="sidebar">
       <div className="brand-lockup">
-        <img alt="MCPJungle logo" className="brand-logo" src={logoUrl} />
+        <img alt="MCPRainforest logo" className="brand-logo" src={logoUrl} />
         <div className="brand-title-row">
-          <p className="brand-title">MCPJungle</p>
+          <p className="brand-title">MCPRainforest</p>
           <span className="brand-beta" title="Dashboard frontend is currently in Beta">
             Beta
           </span>
@@ -98,7 +98,7 @@ export function NavSidebar({
       <div className="sidebar-actions">
         <a
           className="sidebar-link"
-          href="https://github.com/mcpjungle/MCPJungle/issues"
+          href="https://github.com/andrewseago/MCPRainforest/issues"
           rel="noopener noreferrer"
           target="_blank"
         >
@@ -120,12 +120,12 @@ export function NavSidebar({
           <span>Report Bugs</span>
         </a>
         <a
-          aria-label="Open MCPJungle documentation"
+          aria-label="Open upstream MCPJungle documentation"
           className="sidebar-link"
           href="https://docs.mcpjungle.com/"
           rel="noopener noreferrer"
           target="_blank"
-          title="Open MCPJungle documentation"
+          title="Open upstream MCPJungle documentation"
         >
           <svg aria-hidden="true" fill="none" height="16" viewBox="0 0 16 16" width="16">
             <path

@@ -56,6 +56,7 @@ Start with a local setup. Scale to a shared team gateway when you need it.
 This fork includes a different dashboard UI from upstream MCPJungle. The dashboard now presents the local server as an operations console with:
 
 - Light, dark, and system theme modes.
+- A fork-specific MCPRainforest logo, favicon, and rainforest palette.
 - Read-only sample MCP inventory when no real servers are registered, so the dashboard is useful to inspect immediately.
 - A populated server overview showing representative servers, tools, prompts, resources, and tool groups.
 - A stronger first viewport with gateway endpoint, status metrics, server inventory, endpoint shortcuts, recent discovery, and quick commands.

@@ -23,7 +23,13 @@ func TestDashboardRootServedInDevMode(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body := readBody(t, resp)
-	require.Contains(t, body, "MCPJungle Dashboard")
+	require.Contains(t, body, "MCPRainforest Dashboard")
+
+	faviconResp := env.do(t, http.MethodGet, "/favicon.svg", nil, "")
+	defer drain(faviconResp)
+
+	require.Equal(t, http.StatusOK, faviconResp.StatusCode)
+	require.Contains(t, readBody(t, faviconResp), "<svg")
 }
 
 func TestDashboardRootHiddenInEnterpriseMode(t *testing.T) {

@@ -435,7 +435,7 @@ const sampleResources: DashboardResource[] = [
     server_status: "reachable",
   },
   {
-    uri: "file:///Users/andrewws/GitHub/MCPJungle/README.md",
+    uri: "file:///workspace/MCPRainforest/README.md",
     name: "Repository README",
     server: "filesystem",
     description: "Top-level project README.",
@@ -445,7 +445,7 @@ const sampleResources: DashboardResource[] = [
     server_status: "connected",
   },
   {
-    uri: "file:///Users/andrewws/GitHub/MCPJungle/docs",
+    uri: "file:///workspace/MCPRainforest/docs",
     name: "Documentation tree",
     server: "filesystem",
     description: "Local documentation directory.",
@@ -455,7 +455,7 @@ const sampleResources: DashboardResource[] = [
     server_status: "connected",
   },
   {
-    uri: "file:///Users/andrewws/GitHub/MCPJungle/web/dashboard",
+    uri: "file:///workspace/MCPRainforest/web/dashboard",
     name: "Dashboard source",
     server: "filesystem",
     description: "React/Vite dashboard workspace.",
@@ -465,7 +465,7 @@ const sampleResources: DashboardResource[] = [
     server_status: "connected",
   },
   {
-    uri: "github://mcpjungle/MCPJungle/issues",
+    uri: "github://andrewseago/MCPRainforest/issues",
     name: "Issue tracker",
     server: "github",
     description: "Repository issue metadata and recent activity.",
