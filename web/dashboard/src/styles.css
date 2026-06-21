@@ -325,6 +325,10 @@ code {
   font-size: 0.88rem;
 }
 
+.updated-chip {
+  color: var(--muted-strong);
+}
+
 .content-grid {
   display: grid;
   gap: 14px;
@@ -933,6 +937,20 @@ button:disabled {
   white-space: nowrap;
 }
 
+.refresh-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.refresh-action svg {
+  width: 16px;
+  height: 16px;
+}
+
 .tool-state-line {
   display: flex;
   align-items: center;
@@ -1219,6 +1237,26 @@ button:disabled {
 .empty-inline {
   margin: 0;
   color: var(--muted);
+}
+
+.filter-empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-height: 150px;
+  align-content: center;
+  padding: 18px;
+  color: var(--muted);
+}
+
+.filter-empty-state strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.filter-empty-state p {
+  margin: 0;
+  max-width: 46rem;
 }
 
 .loading-screen,

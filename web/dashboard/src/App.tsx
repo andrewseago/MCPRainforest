@@ -35,6 +35,20 @@ function TrashIcon() {
   );
 }
 
+function RefreshIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="16" viewBox="0 0 16 16" width="16">
+      <path
+        d="M12.75 5.25A5 5 0 1 0 13 8M12.75 5.25V2.75M12.75 5.25h-2.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
 type LoadState = "idle" | "loading" | "ready" | "error";
 type FeedbackTone = "success" | "error";
 type ThemeMode = "light" | "dark" | "system";
@@ -442,6 +456,27 @@ function createInitialToolGroupForm(): ToolGroupFormState {
 const themeModes: ThemeMode[] = ["light", "dark", "system"];
 const dashboardThemeKey = "mcprainforest-dashboard-theme";
 const legacyDashboardThemeKey = "mcpjungle-dashboard-theme";
+const dashboardSectionKey = "mcprainforest-dashboard-section";
+const legacyDashboardSectionKey = "mcpjungle-dashboard-section";
+
+function isAppSection(value: string | null): value is AppSection {
+  return (
+    value === "servers" ||
+    value === "tools" ||
+    value === "tool_groups" ||
+    value === "prompts" ||
+    value === "resources" ||
+    value === "diagnostics"
+  );
+}
+
+function initialSection(): AppSection {
+  if (typeof window === "undefined") {
+    return "servers";
+  }
+  const stored = window.localStorage.getItem(dashboardSectionKey) ?? window.localStorage.getItem(legacyDashboardSectionKey);
+  return isAppSection(stored) ? stored : "servers";
+}
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return value === "light" || value === "dark" || value === "system";
@@ -496,6 +531,51 @@ function compactServerMode(mode?: string) {
   return mode || "unknown";
 }
 
+function formatUpdatedAt(value: Date | null) {
+  if (!value) {
+    return "";
+  }
+  return value.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function FilterEmptyState({
+  actionLabel,
+  description,
+  onClear,
+  title,
+}: {
+  actionLabel: string;
+  description: string;
+  onClear: () => void;
+  title: string;
+}) {
+  return (
+    <section className="filter-empty-state">
+      <strong>{title}</strong>
+      <p>{description}</p>
+      <button className="secondary-action" onClick={onClear} type="button">
+        {actionLabel}
+      </button>
+    </section>
+  );
+}
+
+function BasicEmptyState({ description, title }: { description: string; title: string }) {
+  return (
+    <section className="panel empty-state">
+      <div>
+        <p className="panel-label">Empty state</p>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+    </section>
+  );
+}
+
 function ThemeModeControl({
   value,
   onChange,
@@ -521,12 +601,14 @@ function ThemeModeControl({
 }
 
 export default function App() {
-  const [section, setSection] = useState<AppSection>("servers");
+  const [section, setSection] = useState<AppSection>(initialSection);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [feedback, setFeedback] = useState<FeedbackMessage | null>(null);
   const [data, setData] = useState<DashboardData>({});
   const [usingPreviewData, setUsingPreviewData] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialThemeMode);
   const [serverFilter, setServerFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
@@ -550,8 +632,13 @@ export default function App() {
   async function loadDashboardData(silent = false) {
     if (!silent) {
       setLoadState("loading");
+    } else {
+      setRefreshing(true);
+      setFeedback(null);
     }
-    setErrorMessage("");
+    if (!silent) {
+      setErrorMessage("");
+    }
     try {
       const [overview, servers, tools, toolGroups, prompts, resources, diagnostics] = await Promise.all([
         api.overview(),
@@ -577,17 +664,38 @@ export default function App() {
       setExpandedPrompt((current) =>
         current && preparedPrompts.some((prompt) => prompt.canonical_name === current) ? current : null,
       );
+      setLastLoadedAt(new Date());
+      setErrorMessage("");
+      if (silent) {
+        setFeedback(null);
+      }
       setLoadState("ready");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      setErrorMessage(message);
-      setLoadState("error");
+      if (silent) {
+        setFeedback({ tone: "error", message: `Refresh failed: ${message}` });
+      } else {
+        setErrorMessage(message);
+        setLoadState("error");
+      }
+    } finally {
+      if (silent) {
+        setRefreshing(false);
+      }
     }
   }
 
   useEffect(() => {
     void loadDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(dashboardSectionKey, section);
+    window.localStorage.removeItem(legacyDashboardSectionKey);
+  }, [section]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -680,6 +788,11 @@ export default function App() {
         promptDescription(prompt).toLowerCase().includes(term),
     );
   }, [data.prompts?.prompts, promptFilter]);
+
+  const hasServerFilter = serverFilter.trim().length > 0;
+  const hasToolFilter = toolFilter.trim().length > 0 || toolServerFilter !== "all";
+  const hasPromptFilter = promptFilter.trim().length > 0;
+  const hasToolGroupToolFilter = toolGroupToolFilter.trim().length > 0 || toolGroupToolServerFilter !== "all";
 
   const overview = data.overview;
   const diagnostics = data.diagnostics;
@@ -1092,6 +1205,21 @@ export default function App() {
           </div>
           <div className="topbar-meta">
             <ThemeModeControl value={themeMode} onChange={setThemeMode} />
+            <button
+              aria-label="Refresh dashboard data"
+              className="secondary-action refresh-action"
+              disabled={refreshing || loadState === "loading"}
+              onClick={() => void loadDashboardData(loadState !== "error")}
+              type="button"
+            >
+              <RefreshIcon />
+              <span>{refreshing ? "Refreshing" : "Refresh"}</span>
+            </button>
+            {lastLoadedAt ? (
+              <span aria-live="polite" className="version-chip updated-chip">
+                {`Updated ${formatUpdatedAt(lastLoadedAt)}`}
+              </span>
+            ) : null}
             {overview?.version ? (
               <span className="version-chip">{`Server version ${shortVersion(overview.version)}`}</span>
             ) : null}
@@ -1218,8 +1346,20 @@ export default function App() {
                       </div>
                     </div>
 
-                    {data.servers.empty_state && filteredServers.length === 0 ? (
+                    {filteredServers.length === 0 && hasServerFilter ? (
+                      <FilterEmptyState
+                        actionLabel="Clear search"
+                        description="Clear the current search to show all registered MCP servers."
+                        onClear={() => setServerFilter("")}
+                        title="No servers match"
+                      />
+                    ) : filteredServers.length === 0 && data.servers.empty_state ? (
                       <EmptyStateCard emptyState={data.servers.empty_state} />
+                    ) : filteredServers.length === 0 ? (
+                      <BasicEmptyState
+                        description="Register an MCP server to populate this inventory."
+                        title="No registered MCP servers"
+                      />
                     ) : (
                       <div className="server-console-list">
                         {filteredServers.map((server) => {
@@ -1424,8 +1564,23 @@ export default function App() {
                   </div>
                 }
               >
-                {data.tools.empty_state && filteredTools.length === 0 ? (
+                {filteredTools.length === 0 && hasToolFilter ? (
+                  <FilterEmptyState
+                    actionLabel="Clear filters"
+                    description="Clear search and server filters to show all discovered tools."
+                    onClear={() => {
+                      setToolFilter("");
+                      setToolServerFilter("all");
+                    }}
+                    title="No tools match"
+                  />
+                ) : filteredTools.length === 0 && data.tools.empty_state ? (
                   <EmptyStateCard emptyState={data.tools.empty_state} />
+                ) : filteredTools.length === 0 ? (
+                  <BasicEmptyState
+                    description="Register an MCP server with tools to populate this table."
+                    title="No discovered tools"
+                  />
                 ) : (
                   <div className="tools-table-wrap">
                     <table className="data-table compact-table tools-table">
@@ -1794,8 +1949,20 @@ export default function App() {
                   </div>
                 }
               >
-                {data.prompts.empty_state && filteredPrompts.length === 0 ? (
+                {filteredPrompts.length === 0 && hasPromptFilter ? (
+                  <FilterEmptyState
+                    actionLabel="Clear search"
+                    description="Clear the current search to show all discovered prompt templates."
+                    onClear={() => setPromptFilter("")}
+                    title="No prompts match"
+                  />
+                ) : filteredPrompts.length === 0 && data.prompts.empty_state ? (
                   <EmptyStateCard emptyState={data.prompts.empty_state} />
+                ) : filteredPrompts.length === 0 ? (
+                  <BasicEmptyState
+                    description="Register an MCP server with prompts to populate this table."
+                    title="No discovered prompts"
+                  />
                 ) : (
                   <div className="tools-table-wrap">
                     <table className="data-table compact-table prompts-table">
@@ -2129,25 +2296,37 @@ export default function App() {
                             ))}
                           </select>
                         </div>
-                        <div className="tool-pick-list">
-                          {availableToolGroupTools.map((tool) => {
-                            const selected = toolGroupForm.selectedTools.includes(tool.canonical_name);
-                            return (
-                              <button
-                                className={`tool-pick-item ${selected ? "is-selected" : ""}`}
-                                key={tool.canonical_name}
-                                onClick={() => toggleToolGroupSelection(tool.canonical_name)}
-                                type="button"
-                              >
-                                <div className="table-primary">{tool.name}</div>
-                                <code className="identifier-code" title={tool.canonical_name}>
-                                  {tool.canonical_name}
-                                </code>
-                                <div className="table-secondary">{tool.server}</div>
-                              </button>
-                            );
-                          })}
-                        </div>
+                        {availableToolGroupTools.length === 0 && hasToolGroupToolFilter ? (
+                          <FilterEmptyState
+                            actionLabel="Clear filters"
+                            description="Clear search and server filters to show all available tools."
+                            onClear={() => {
+                              setToolGroupToolFilter("");
+                              setToolGroupToolServerFilter("all");
+                            }}
+                            title="No available tools match"
+                          />
+                        ) : (
+                          <div className="tool-pick-list">
+                            {availableToolGroupTools.map((tool) => {
+                              const selected = toolGroupForm.selectedTools.includes(tool.canonical_name);
+                              return (
+                                <button
+                                  className={`tool-pick-item ${selected ? "is-selected" : ""}`}
+                                  key={tool.canonical_name}
+                                  onClick={() => toggleToolGroupSelection(tool.canonical_name)}
+                                  type="button"
+                                >
+                                  <div className="table-primary">{tool.name}</div>
+                                  <code className="identifier-code" title={tool.canonical_name}>
+                                    {tool.canonical_name}
+                                  </code>
+                                  <div className="table-secondary">{tool.server}</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </>
                     ) : (
                       <p className="empty-inline">Register MCP servers first so tools are available to group.</p>
