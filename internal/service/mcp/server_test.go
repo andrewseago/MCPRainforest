@@ -26,6 +26,7 @@ func setupTestDBForServerLifecycle(t *testing.T) *gorm.DB {
 
 	err = db.AutoMigrate(
 		&model.McpServer{},
+		&model.McpServerRegistrationSource{},
 		&model.Tool{},
 		&model.Prompt{},
 		&model.Resource{},

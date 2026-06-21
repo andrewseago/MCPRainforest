@@ -13,6 +13,9 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(&model.McpServer{}); err != nil {
 		return fmt.Errorf("auto‑migration failed for McpServer model: %v", err)
 	}
+	if err := db.AutoMigrate(&model.McpServerRegistrationSource{}); err != nil {
+		return fmt.Errorf("auto-migration failed for McpServerRegistrationSource model: %v", err)
+	}
 	if err := db.AutoMigrate(&model.Tool{}); err != nil {
 		return fmt.Errorf("auto‑migration failed for Tool model: %v", err)
 	}

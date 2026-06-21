@@ -148,6 +148,47 @@ func TestDashboardMarketplaceAPI(t *testing.T) {
 	require.Contains(t, everything.Install.Args, "@modelcontextprotocol/server-everything")
 }
 
+func TestDashboardMarketplaceRegistrationRecordsProvenance(t *testing.T) {
+	env := setupE2EServer(t, model.ModeDev)
+
+	registerResp := env.do(t, http.MethodPost, "/api/dashboard/servers", map[string]any{
+		"name":                 "everything",
+		"description":          "Marketplace provenance test server",
+		"transport":            "stdio",
+		"command":              "npx",
+		"args":                 []string{"-y", "@modelcontextprotocol/server-everything", "stdio"},
+		"marketplace_entry_id": "server-everything",
+	}, "")
+	defer drain(registerResp)
+	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
+
+	resp := env.do(t, http.MethodGet, "/api/dashboard/marketplace", nil, "")
+	defer drain(resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var payload types.DashboardMarketplaceResponse
+	decodeJSON(t, resp, &payload)
+
+	var everything *types.DashboardMarketplaceServer
+	for index := range payload.Servers {
+		if payload.Servers[index].ID == "server-everything" {
+			everything = &payload.Servers[index]
+			break
+		}
+	}
+
+	require.NotNil(t, everything)
+	require.True(t, everything.Installed)
+	require.Equal(t, "everything", everything.InstalledServerName)
+	require.Equal(t, types.DashboardMarketplaceUpdateCurrent, everything.UpdateState)
+	require.NotNil(t, everything.Installation)
+	require.Equal(t, "server-everything", everything.Installation.EntryID)
+	require.Equal(t, "official-registry", everything.Installation.SourceID)
+	require.Equal(t, "catalog:server-everything:npm", everything.Installation.InstalledDigest)
+	require.Equal(t, "catalog:server-everything:npm", everything.Installation.CatalogDigest)
+	require.NotEmpty(t, everything.Installation.InstalledAt)
+}
+
 func TestDashboardServerSummariesDoNotExposeSecrets(t *testing.T) {
 	env := setupE2EServer(t, model.ModeDev)
 

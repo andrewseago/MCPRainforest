@@ -54,6 +54,7 @@ function RefreshIcon() {
 type LoadState = "idle" | "loading" | "ready" | "error";
 type FeedbackTone = "success" | "error";
 type ThemeMode = "light" | "dark" | "system";
+type RegisterDraftMode = "manual" | "marketplace_add" | "marketplace_update_review";
 
 interface FeedbackMessage {
   tone: FeedbackTone;
@@ -76,6 +77,7 @@ interface RegisterServerFormState {
   url: string;
   bearer_token: string;
   header_rows: KeyValueRow[];
+  marketplace_entry_id?: string;
 }
 
 interface RegisterOAuthState {
@@ -159,6 +161,36 @@ function marketplaceStatusTone(value?: string) {
   }
   if (value === "review_required" || value === "external") {
     return "warn" as const;
+  }
+  return "muted" as const;
+}
+
+function marketplaceUpdateLabel(value?: string) {
+  switch (value) {
+    case "not_installed":
+      return "not installed";
+    case "current":
+      return "current";
+    case "update_available":
+      return "update available";
+    case "local_changes":
+      return "local changes";
+    case "unknown":
+      return "update unknown";
+    default:
+      return "update unknown";
+  }
+}
+
+function marketplaceUpdateTone(value?: string) {
+  if (value === "current") {
+    return "good" as const;
+  }
+  if (value === "update_available" || value === "local_changes") {
+    return "warn" as const;
+  }
+  if (value === "unknown") {
+    return "muted" as const;
   }
   return "muted" as const;
 }
@@ -436,6 +468,7 @@ function marketplaceDraftToRegisterForm(entry: DashboardMarketplaceServer): Regi
     env_rows: keyedRows(draft.env, draft.required_env_keys),
     url: draft.url ?? "",
     header_rows: keyedRows(draft.headers, draft.required_header_keys),
+    marketplace_entry_id: entry.id,
   };
 }
 
@@ -478,6 +511,9 @@ function buildRegisterPayload(form: RegisterServerFormState): DashboardRegisterS
     transport: form.transport,
     session_mode: form.session_mode,
   };
+  if (form.marketplace_entry_id) {
+    payload.marketplace_entry_id = form.marketplace_entry_id;
+  }
 
   if (form.transport === "stdio") {
     payload.command = form.command.trim();
@@ -675,6 +711,7 @@ export default function App() {
   const [marketplaceSourceFilter, setMarketplaceSourceFilter] = useState("all");
   const [marketplaceTransportFilter, setMarketplaceTransportFilter] = useState("all");
   const [marketplaceStatusFilter, setMarketplaceStatusFilter] = useState("all");
+  const [marketplaceUpdateFilter, setMarketplaceUpdateFilter] = useState("all");
   const [serverFilter, setServerFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
   const [toolServerFilter, setToolServerFilter] = useState("all");
@@ -690,6 +727,7 @@ export default function App() {
   const [registerForm, setRegisterForm] = useState<RegisterServerFormState>(createInitialRegisterForm());
   const [registerError, setRegisterError] = useState("");
   const [registerDraftNotice, setRegisterDraftNotice] = useState("");
+  const [registerDraftMode, setRegisterDraftMode] = useState<RegisterDraftMode>("manual");
   const [registerOAuth, setRegisterOAuth] = useState<RegisterOAuthState | null>(null);
   const [toolGroupOpen, setToolGroupOpen] = useState(false);
   const [toolGroupForm, setToolGroupForm] = useState<ToolGroupFormState>(createInitialToolGroupForm());
@@ -844,6 +882,11 @@ export default function App() {
     return Array.from(statuses).sort();
   }, [marketplaceData?.servers]);
 
+  const marketplaceUpdateStates = useMemo(() => {
+    const states = new Set((marketplaceData?.servers ?? []).map((server) => server.update_state));
+    return Array.from(states).sort();
+  }, [marketplaceData?.servers]);
+
   const filteredMarketplaceServers = useMemo(() => {
     let servers = marketplaceData?.servers ?? [];
     if (marketplaceSourceFilter !== "all") {
@@ -854,6 +897,9 @@ export default function App() {
     }
     if (marketplaceStatusFilter !== "all") {
       servers = servers.filter((server) => server.install_status === marketplaceStatusFilter);
+    }
+    if (marketplaceUpdateFilter !== "all") {
+      servers = servers.filter((server) => server.update_state === marketplaceUpdateFilter);
     }
     if (!marketplaceFilter.trim()) {
       return servers;
@@ -878,6 +924,7 @@ export default function App() {
     marketplaceSourceFilter,
     marketplaceStatusFilter,
     marketplaceTransportFilter,
+    marketplaceUpdateFilter,
   ]);
 
   const filteredTools = useMemo(() => {
@@ -940,7 +987,8 @@ export default function App() {
     marketplaceFilter.trim().length > 0 ||
     marketplaceSourceFilter !== "all" ||
     marketplaceTransportFilter !== "all" ||
-    marketplaceStatusFilter !== "all";
+    marketplaceStatusFilter !== "all" ||
+    marketplaceUpdateFilter !== "all";
   const hasServerFilter = serverFilter.trim().length > 0;
   const hasToolFilter = toolFilter.trim().length > 0 || toolServerFilter !== "all";
   const hasPromptFilter = promptFilter.trim().length > 0;
@@ -1028,7 +1076,10 @@ export default function App() {
     setBusy(key, true);
     try {
       await action();
-      await loadDashboardData(true);
+      await Promise.all([
+        loadDashboardData(true),
+        marketplaceData ? loadMarketplaceData(true) : Promise.resolve(),
+      ]);
       setFeedback({ tone: "success", message: successMessage });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Request failed";
@@ -1072,6 +1123,7 @@ export default function App() {
     setRegisterForm(createInitialRegisterForm());
     setRegisterError("");
     setRegisterDraftNotice("");
+    setRegisterDraftMode("manual");
     setRegisterOAuth(null);
     setRegisterOpen(true);
   }
@@ -1080,13 +1132,20 @@ export default function App() {
     if (!entry.install || entry.install_status === "blocked" || entry.install_status === "external") {
       return;
     }
+    const isUpdateReview = entry.installed && entry.update_state === "update_available";
+    const hasLocalChanges = entry.installed && entry.update_state === "local_changes";
     setRegisterForm(marketplaceDraftToRegisterForm(entry));
     setRegisterError("");
     setRegisterDraftNotice(
-      entry.install_status === "review_required"
+      isUpdateReview
+        ? `${marketplaceDisplayName(entry)} has newer marketplace metadata. Review the catalog draft; automatic replacement is intentionally disabled.`
+        : hasLocalChanges
+          ? `${marketplaceDisplayName(entry)} was installed from this marketplace entry, but the local registration differs from the catalog draft. Review before changing it.`
+          : entry.install_status === "review_required"
         ? `${marketplaceDisplayName(entry)} requires review before registration. Check the command, args, and security notes before submitting.`
         : `${marketplaceDisplayName(entry)} is a marketplace draft. Review the target and submit when ready.`,
     );
+    setRegisterDraftMode(isUpdateReview || hasLocalChanges ? "marketplace_update_review" : "marketplace_add");
     setRegisterOAuth(null);
     setRegisterOpen(true);
   }
@@ -1095,6 +1154,7 @@ export default function App() {
     setRegisterOpen(false);
     setRegisterError("");
     setRegisterDraftNotice("");
+    setRegisterDraftMode("manual");
     setRegisterOAuth(null);
     setRegisterForm(createInitialRegisterForm());
   }
@@ -1140,6 +1200,10 @@ export default function App() {
       setRegisterError(validationError);
       return;
     }
+    if (registerDraftMode === "marketplace_update_review") {
+      setRegisterError("Automatic replacement is not enabled. Delete and re-add this server only after reviewing the catalog draft.");
+      return;
+    }
 
     setRegisterError("");
     try {
@@ -1155,7 +1219,7 @@ export default function App() {
         setFeedback(null);
         return;
       }
-      await loadDashboardData(true);
+      await Promise.all([loadDashboardData(true), loadMarketplaceData(true)]);
       setFeedback({ tone: "success", message: `Server ${registerForm.name.trim()} registered.` });
       closeRegisterModal();
     } catch (error) {
@@ -1201,7 +1265,7 @@ export default function App() {
           return
         }
         if (response.status === "completed") {
-          await loadDashboardData(true)
+          await Promise.all([loadDashboardData(true), loadMarketplaceData(true)])
           if (cancelled) {
             return
           }
@@ -1359,9 +1423,37 @@ export default function App() {
 
   function renderMarketplaceAction(entry: DashboardMarketplaceServer) {
     if (entry.installed) {
+      if (entry.install && entry.update_state === "update_available") {
+        return (
+          <button
+            className="secondary-action"
+            onClick={(event) => {
+              event.stopPropagation();
+              openMarketplaceRegistrationDraft(entry);
+            }}
+            type="button"
+          >
+            Review Update
+          </button>
+        );
+      }
+      if (entry.install && entry.update_state === "local_changes") {
+        return (
+          <button
+            className="secondary-action"
+            onClick={(event) => {
+              event.stopPropagation();
+              openMarketplaceRegistrationDraft(entry);
+            }}
+            type="button"
+          >
+            Review Draft
+          </button>
+        );
+      }
       return (
         <button className="secondary-action" disabled type="button">
-          Installed
+          {entry.update_state === "current" ? "Current" : "Update Unknown"}
         </button>
       );
     }
@@ -1782,10 +1874,22 @@ export default function App() {
                       onChange={(event) => setMarketplaceStatusFilter(event.target.value)}
                       value={marketplaceStatusFilter}
                     >
-                      <option value="all">All states</option>
+                      <option value="all">All catalog states</option>
                       {marketplaceStatuses.map((status) => (
                         <option key={status} value={status}>
                           {marketplaceStatusLabel(status)}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="table-filter compact-filter compact-select"
+                      onChange={(event) => setMarketplaceUpdateFilter(event.target.value)}
+                      value={marketplaceUpdateFilter}
+                    >
+                      <option value="all">All update states</option>
+                      {marketplaceUpdateStates.map((state) => (
+                        <option key={state} value={state}>
+                          {marketplaceUpdateLabel(state)}
                         </option>
                       ))}
                     </select>
@@ -1822,11 +1926,12 @@ export default function App() {
                 ) : filteredMarketplaceServers.length === 0 && hasMarketplaceFilter ? (
                   <FilterEmptyState
                     actionLabel="Clear filters"
-                    description="Clear search, source, state, and transport filters to show all catalog entries."
+                    description="Clear search, source, state, update, and transport filters to show all catalog entries."
                     onClear={() => {
                       setMarketplaceFilter("");
                       setMarketplaceSourceFilter("all");
                       setMarketplaceStatusFilter("all");
+                      setMarketplaceUpdateFilter("all");
                       setMarketplaceTransportFilter("all");
                     }}
                     title="No marketplace entries match"
@@ -1876,17 +1981,22 @@ export default function App() {
                                 <td>
                                   <div className="marketplace-category-cell">
                                     <span>{entry.category || "Uncategorized"}</span>
-                                    {entry.installed ? (
-                                      <StatusBadge text="Installed" tone="good" />
-                                    ) : null}
                                   </div>
                                 </td>
                                 <td>{transportLabel(entry.transport)}</td>
                                 <td>
-                                  <StatusBadge
-                                    text={marketplaceStatusLabel(entry.install_status)}
-                                    tone={marketplaceStatusTone(entry.install_status)}
-                                  />
+                                  <div className="marketplace-state-stack">
+                                    <StatusBadge
+                                      text={marketplaceStatusLabel(entry.install_status)}
+                                      tone={marketplaceStatusTone(entry.install_status)}
+                                    />
+                                    {entry.installed ? (
+                                      <StatusBadge
+                                        text={marketplaceUpdateLabel(entry.update_state)}
+                                        tone={marketplaceUpdateTone(entry.update_state)}
+                                      />
+                                    ) : null}
+                                  </div>
                                 </td>
                                 <td>
                                   <div className="row-actions" onClick={(event) => event.stopPropagation()}>
@@ -1936,6 +2046,15 @@ export default function App() {
                                         <div>
                                           <dt>Auth</dt>
                                           <dd>{entry.auth_type || "Unknown"}</dd>
+                                        </div>
+                                        <div>
+                                          <dt>Update state</dt>
+                                          <dd>
+                                            <StatusBadge
+                                              text={marketplaceUpdateLabel(entry.update_state)}
+                                              tone={marketplaceUpdateTone(entry.update_state)}
+                                            />
+                                          </dd>
                                         </div>
                                       </dl>
 
@@ -2001,6 +2120,42 @@ export default function App() {
                                             <p className="empty-inline">This entry cannot create a local registration draft.</p>
                                           )}
                                         </section>
+
+                                        {entry.installed ? (
+                                          <section className="marketplace-detail-section">
+                                            <h4>Installation</h4>
+                                            {entry.installation ? (
+                                              <dl className="schema-field-meta">
+                                                <div>
+                                                  <dt>Server</dt>
+                                                  <dd>
+                                                    <code>{entry.installation.server_name}</code>
+                                                  </dd>
+                                                </div>
+                                                <div>
+                                                  <dt>Installed digest</dt>
+                                                  <dd>
+                                                    <code>{entry.installation.installed_digest || "Unavailable"}</code>
+                                                  </dd>
+                                                </div>
+                                                <div>
+                                                  <dt>Catalog digest</dt>
+                                                  <dd>
+                                                    <code>{entry.installation.catalog_digest || "Unavailable"}</code>
+                                                  </dd>
+                                                </div>
+                                                <div>
+                                                  <dt>Installed at</dt>
+                                                  <dd>{entry.installation.installed_at || "Unknown"}</dd>
+                                                </div>
+                                              </dl>
+                                            ) : (
+                                              <p className="empty-inline">
+                                                This server is installed, but no marketplace provenance was recorded.
+                                              </p>
+                                            )}
+                                          </section>
+                                        ) : null}
 
                                         <section className="marketplace-detail-section">
                                           <h4>Policy</h4>
@@ -2909,8 +3064,16 @@ export default function App() {
             <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
               <div className="modal-header">
                 <div>
-                  <p className="panel-label">Add server</p>
-                  <h2>{registerOAuth ? "Complete OAuth authorization" : "Register an MCP server"}</h2>
+                  <p className="panel-label">
+                    {registerDraftMode === "marketplace_update_review" ? "Marketplace update" : "Add server"}
+                  </p>
+                  <h2>
+                    {registerOAuth
+                      ? "Complete OAuth authorization"
+                      : registerDraftMode === "marketplace_update_review"
+                        ? "Review marketplace update"
+                        : "Register an MCP server"}
+                  </h2>
                 </div>
                 <button className="secondary-action" onClick={closeRegisterModal} type="button">
                   Close
@@ -3169,11 +3332,15 @@ export default function App() {
                     </button>
                     <button
                       className="primary-action"
-                      disabled={isBusy("register-server")}
+                      disabled={isBusy("register-server") || registerDraftMode === "marketplace_update_review"}
                       onClick={() => void submitRegisterServer()}
                       type="button"
                     >
-                      {isBusy("register-server") ? "Registering..." : "+ Add Server"}
+                      {registerDraftMode === "marketplace_update_review"
+                        ? "Review Only"
+                        : isBusy("register-server")
+                          ? "Registering..."
+                          : "+ Add Server"}
                     </button>
                   </>
                 )}

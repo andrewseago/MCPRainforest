@@ -1,10 +1,16 @@
 package dashboard
 
 import (
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"sort"
+	"time"
 
 	"github.com/mcpjungle/mcpjungle/internal/model"
+	"github.com/mcpjungle/mcpjungle/pkg/apierrors"
 	"github.com/mcpjungle/mcpjungle/pkg/types"
+	"gorm.io/gorm/clause"
 )
 
 // Marketplace returns a curated, dry-run catalog for the dashboard. Entries are
@@ -21,10 +27,7 @@ func (s *Service) Marketplace() (*types.DashboardMarketplaceResponse, error) {
 		return nil, err
 	}
 	for index := range resp.Servers {
-		if serverName, ok := installed[resp.Servers[index].Name]; ok {
-			resp.Servers[index].Installed = true
-			resp.Servers[index].InstalledServerName = serverName
-		}
+		annotateMarketplaceInstallation(&resp.Servers[index], installed)
 	}
 
 	if len(resp.Servers) == 0 {
@@ -37,20 +40,213 @@ func (s *Service) Marketplace() (*types.DashboardMarketplaceResponse, error) {
 	return resp, nil
 }
 
-func (s *Service) installedMarketplaceServers() (map[string]string, error) {
-	installed := map[string]string{}
+type installedMarketplaceServer struct {
+	Server model.McpServer
+	Source *model.McpServerRegistrationSource
+}
+
+func (s *Service) installedMarketplaceServers() (map[string]installedMarketplaceServer, error) {
+	installed := map[string]installedMarketplaceServer{}
 	if s == nil || s.db == nil {
 		return installed, nil
 	}
 
 	var servers []model.McpServer
-	if err := s.db.Select("name").Find(&servers).Error; err != nil {
+	if err := s.db.Find(&servers).Error; err != nil {
 		return nil, err
 	}
+	var sources []model.McpServerRegistrationSource
+	if err := s.db.
+		Where("source_type = ?", model.McpServerRegistrationSourceMarketplace).
+		Find(&sources).Error; err != nil {
+		return nil, err
+	}
+	sourceByServer := map[string]*model.McpServerRegistrationSource{}
+	for index := range sources {
+		sourceByServer[sources[index].ServerName] = &sources[index]
+	}
 	for _, server := range servers {
-		installed[server.Name] = server.Name
+		installed[server.Name] = installedMarketplaceServer{
+			Server: server,
+			Source: sourceByServer[server.Name],
+		}
 	}
 	return installed, nil
+}
+
+func annotateMarketplaceInstallation(entry *types.DashboardMarketplaceServer, installed map[string]installedMarketplaceServer) {
+	entry.UpdateState = types.DashboardMarketplaceUpdateNotInstalled
+	installedServer, ok := installed[entry.Name]
+	if !ok {
+		return
+	}
+
+	entry.Installed = true
+	entry.InstalledServerName = installedServer.Server.Name
+	if installedServer.Source == nil || installedServer.Source.EntryID != entry.ID {
+		entry.UpdateState = types.DashboardMarketplaceUpdateUnknown
+		return
+	}
+
+	entry.Installation = marketplaceInstallation(entry, installedServer.Source)
+	if marketplaceCatalogChanged(entry, installedServer.Source) {
+		entry.UpdateState = types.DashboardMarketplaceUpdateAvailable
+		return
+	}
+	if !marketplaceServerMatchesInstall(installedServer.Server, entry.Install) {
+		entry.UpdateState = types.DashboardMarketplaceUpdateLocalChanges
+		return
+	}
+	entry.UpdateState = types.DashboardMarketplaceUpdateCurrent
+}
+
+func marketplaceInstallation(entry *types.DashboardMarketplaceServer, source *model.McpServerRegistrationSource) *types.DashboardMarketplaceInstallation {
+	return &types.DashboardMarketplaceInstallation{
+		ServerName:       source.ServerName,
+		EntryID:          source.EntryID,
+		SourceID:         source.SourceID,
+		InstalledVersion: source.InstalledVersion,
+		InstalledDigest:  source.InstalledDigest,
+		CatalogVersion:   entry.Version,
+		CatalogDigest:    entry.Digest,
+		InstalledAt:      formatTime(source.InstalledAt),
+	}
+}
+
+func marketplaceCatalogChanged(entry *types.DashboardMarketplaceServer, source *model.McpServerRegistrationSource) bool {
+	if entry.Digest != "" || source.InstalledDigest != "" {
+		return entry.Digest != source.InstalledDigest
+	}
+	if entry.Version != "" || source.InstalledVersion != "" {
+		return entry.Version != source.InstalledVersion
+	}
+	return false
+}
+
+func marketplaceServerMatchesInstall(server model.McpServer, install *types.DashboardMarketplaceInstall) bool {
+	if install == nil {
+		return false
+	}
+	if string(server.Transport) != install.Transport {
+		return false
+	}
+	if install.SessionMode != "" && string(server.SessionMode) != install.SessionMode {
+		return false
+	}
+
+	switch server.Transport {
+	case types.TransportStreamableHTTP:
+		config, err := server.GetStreamableHTTPConfig()
+		return err == nil && config.URL == install.URL && mapKeysEqual(config.Headers, install.Headers)
+	case types.TransportSSE:
+		config, err := server.GetSSEConfig()
+		return err == nil && config.URL == install.URL
+	case types.TransportStdio:
+		config, err := server.GetStdioConfig()
+		return err == nil &&
+			config.Command == install.Command &&
+			reflect.DeepEqual(config.Args, install.Args) &&
+			mapKeysEqual(config.Env, install.Env)
+	default:
+		return false
+	}
+}
+
+func mapKeysEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key := range left {
+		if _, ok := right[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) ValidateMarketplaceRegistration(entryID string, input *types.RegisterServerInput) error {
+	if entryID == "" {
+		return nil
+	}
+	entry, ok := marketplaceServerByID(entryID)
+	if !ok {
+		return fmt.Errorf("marketplace entry %q was not found: %w", entryID, apierrors.ErrInvalidInput)
+	}
+	if entry.Install == nil {
+		return fmt.Errorf("marketplace entry %q cannot be registered from a catalog draft: %w", entryID, apierrors.ErrInvalidInput)
+	}
+	if input.Name != entry.Install.Name {
+		return fmt.Errorf("marketplace entry %q must be registered as %q: %w", entryID, entry.Install.Name, apierrors.ErrInvalidInput)
+	}
+	if input.Transport != entry.Install.Transport {
+		return fmt.Errorf("marketplace entry %q must use %s transport: %w", entryID, entry.Install.Transport, apierrors.ErrInvalidInput)
+	}
+	return nil
+}
+
+func (s *Service) RecordMarketplaceInstallation(serverName, entryID string) error {
+	if entryID == "" || s == nil || s.db == nil {
+		return nil
+	}
+	entry, ok := marketplaceServerByID(entryID)
+	if !ok {
+		return fmt.Errorf("marketplace entry %q was not found: %w", entryID, apierrors.ErrInvalidInput)
+	}
+	if entry.Install == nil {
+		return fmt.Errorf("marketplace entry %q cannot be registered from a catalog draft: %w", entryID, apierrors.ErrInvalidInput)
+	}
+
+	draft, err := json.Marshal(entry.Install)
+	if err != nil {
+		return fmt.Errorf("failed to serialize marketplace install draft: %w", err)
+	}
+	sourceURL := marketplaceSourceURL(entry.SourceID)
+	now := time.Now().UTC()
+	record := model.McpServerRegistrationSource{
+		ServerName:          serverName,
+		SourceType:          model.McpServerRegistrationSourceMarketplace,
+		SourceID:            entry.SourceID,
+		SourceURL:           sourceURL,
+		EntryID:             entry.ID,
+		Publisher:           entry.Publisher,
+		InstalledVersion:    entry.Version,
+		InstalledDigest:     entry.Digest,
+		InstalledAt:         now,
+		CatalogInstallDraft: draft,
+	}
+	return s.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "server_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"source_type",
+			"source_id",
+			"source_url",
+			"entry_id",
+			"publisher",
+			"installed_version",
+			"installed_digest",
+			"installed_at",
+			"catalog_install_draft",
+			"updated_at",
+		}),
+	}).Create(&record).Error
+}
+
+func marketplaceServerByID(entryID string) (types.DashboardMarketplaceServer, bool) {
+	for _, entry := range marketplaceServers() {
+		if entry.ID == entryID {
+			return entry, true
+		}
+	}
+	return types.DashboardMarketplaceServer{}, false
+}
+
+func marketplaceSourceURL(sourceID string) string {
+	for _, source := range marketplaceSources() {
+		if source.ID == sourceID {
+			return source.URL
+		}
+	}
+	return ""
 }
 
 func marketplaceSources() []types.DashboardMarketplaceSource {

@@ -144,12 +144,21 @@ type DashboardDiagnosticsResponse struct {
 }
 
 type DashboardMarketplaceInstallStatus string
+type DashboardMarketplaceUpdateState string
 
 const (
 	DashboardMarketplaceInstallable    DashboardMarketplaceInstallStatus = "installable"
 	DashboardMarketplaceReviewRequired DashboardMarketplaceInstallStatus = "review_required"
 	DashboardMarketplaceExternal       DashboardMarketplaceInstallStatus = "external"
 	DashboardMarketplaceBlocked        DashboardMarketplaceInstallStatus = "blocked"
+)
+
+const (
+	DashboardMarketplaceUpdateNotInstalled DashboardMarketplaceUpdateState = "not_installed"
+	DashboardMarketplaceUpdateUnknown      DashboardMarketplaceUpdateState = "unknown"
+	DashboardMarketplaceUpdateCurrent      DashboardMarketplaceUpdateState = "current"
+	DashboardMarketplaceUpdateLocalChanges DashboardMarketplaceUpdateState = "local_changes"
+	DashboardMarketplaceUpdateAvailable    DashboardMarketplaceUpdateState = "update_available"
 )
 
 type DashboardMarketplaceSource struct {
@@ -174,6 +183,17 @@ type DashboardMarketplaceInstall struct {
 	RequiredHeaderKeys []string          `json:"required_header_keys,omitempty"`
 }
 
+type DashboardMarketplaceInstallation struct {
+	ServerName       string `json:"server_name"`
+	EntryID          string `json:"entry_id"`
+	SourceID         string `json:"source_id"`
+	InstalledVersion string `json:"installed_version,omitempty"`
+	InstalledDigest  string `json:"installed_digest,omitempty"`
+	CatalogVersion   string `json:"catalog_version,omitempty"`
+	CatalogDigest    string `json:"catalog_digest,omitempty"`
+	InstalledAt      string `json:"installed_at,omitempty"`
+}
+
 type DashboardMarketplaceServer struct {
 	ID                  string                            `json:"id"`
 	Name                string                            `json:"name"`
@@ -193,6 +213,8 @@ type DashboardMarketplaceServer struct {
 	Install             *DashboardMarketplaceInstall      `json:"install,omitempty"`
 	Installed           bool                              `json:"installed"`
 	InstalledServerName string                            `json:"installed_server_name,omitempty"`
+	UpdateState         DashboardMarketplaceUpdateState   `json:"update_state"`
+	Installation        *DashboardMarketplaceInstallation `json:"installation,omitempty"`
 	ReviewReasons       []string                          `json:"review_reasons,omitempty"`
 	SecurityNotes       []string                          `json:"security_notes,omitempty"`
 }

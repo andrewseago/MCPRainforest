@@ -258,6 +258,7 @@ func SetupTestDB(t *testing.T) *TestDBSetup {
 		&model.User{},
 		&model.McpClient{},
 		&model.McpServer{},
+		&model.McpServerRegistrationSource{},
 		&model.Tool{},
 		&model.ServerConfig{},
 		&model.ToolGroup{},

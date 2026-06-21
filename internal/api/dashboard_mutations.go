@@ -15,6 +15,11 @@ type dashboardToggleRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+type dashboardRegisterServerRequest struct {
+	types.RegisterServerInput
+	MarketplaceEntryID string `json:"marketplace_entry_id,omitempty"`
+}
+
 type dashboardRegisterServerResponse struct {
 	Name                  string                                    `json:"name,omitempty"`
 	Transport             string                                    `json:"transport,omitempty"`
@@ -33,9 +38,15 @@ type dashboardOAuthSessionResponse struct {
 
 func (s *Server) dashboardRegisterServerHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var input types.RegisterServerInput
-		if err := c.ShouldBindJSON(&input); err != nil {
+		var request dashboardRegisterServerRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		input := request.RegisterServerInput
+
+		if err := s.dashboardService.ValidateMarketplaceRegistration(request.MarketplaceEntryID, &input); err != nil {
+			handleServiceError(c, err)
 			return
 		}
 
@@ -64,6 +75,11 @@ func (s *Server) dashboardRegisterServerHandler() gin.HandlerFunc {
 				})
 				return
 			}
+			handleServiceError(c, err)
+			return
+		}
+
+		if err := s.dashboardService.RecordMarketplaceInstallation(server.Name, request.MarketplaceEntryID); err != nil {
 			handleServiceError(c, err)
 			return
 		}

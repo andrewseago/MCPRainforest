@@ -1270,6 +1270,13 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.marketplace-state-stack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .marketplace-action-link {
   display: inline-flex;
   align-items: center;

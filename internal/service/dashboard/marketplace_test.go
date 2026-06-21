@@ -3,8 +3,13 @@ package dashboard
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/mcpjungle/mcpjungle/internal/model"
+	"github.com/mcpjungle/mcpjungle/pkg/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestMarketplaceCatalogIncludesReviewedInstallDrafts(t *testing.T) {
@@ -57,4 +62,127 @@ func TestMarketplaceCatalogIncludesReviewedInstallDrafts(t *testing.T) {
 	require.NotContains(t, string(body), "oauth_client_secret")
 	require.NotContains(t, string(body), "token-value")
 	require.NotContains(t, string(body), "Authorization: Bearer")
+}
+
+func TestMarketplaceUpdateStateForCatalogInstallations(t *testing.T) {
+	t.Run("static catalog without db is not installed", func(t *testing.T) {
+		service := NewService(nil, false)
+
+		resp, err := service.Marketplace()
+		require.NoError(t, err)
+
+		context7 := requireMarketplaceEntry(t, resp, "context7")
+		require.False(t, context7.Installed)
+		require.Equal(t, types.DashboardMarketplaceUpdateNotInstalled, context7.UpdateState)
+		require.Nil(t, context7.Installation)
+	})
+
+	t.Run("manual install without provenance is unknown", func(t *testing.T) {
+		db := newMarketplaceTestDB(t)
+		server, err := model.NewStreamableHTTPServer(
+			"context7",
+			"Current documentation lookup through Context7.",
+			"https://mcp.context7.com/mcp",
+			"",
+			nil,
+			"",
+		)
+		require.NoError(t, err)
+		require.NoError(t, db.Create(server).Error)
+
+		resp, err := NewService(db, false).Marketplace()
+		require.NoError(t, err)
+
+		context7 := requireMarketplaceEntry(t, resp, "context7")
+		require.True(t, context7.Installed)
+		require.Equal(t, "context7", context7.InstalledServerName)
+		require.Equal(t, types.DashboardMarketplaceUpdateUnknown, context7.UpdateState)
+		require.Nil(t, context7.Installation)
+	})
+
+	t.Run("matching persisted digest is current", func(t *testing.T) {
+		db := newMarketplaceTestDB(t)
+		server, err := model.NewStreamableHTTPServer(
+			"context7",
+			"Current documentation lookup through Context7.",
+			"https://mcp.context7.com/mcp",
+			"",
+			nil,
+			"",
+		)
+		require.NoError(t, err)
+		require.NoError(t, db.Create(server).Error)
+		require.NoError(t, db.Create(&model.McpServerRegistrationSource{
+			ServerName:       "context7",
+			SourceType:       "marketplace",
+			SourceID:         "official-registry",
+			EntryID:          "context7",
+			InstalledVersion: "remote",
+			InstalledDigest:  "catalog:context7:remote",
+			InstalledAt:      time.Now().UTC(),
+		}).Error)
+
+		resp, err := NewService(db, false).Marketplace()
+		require.NoError(t, err)
+
+		context7 := requireMarketplaceEntry(t, resp, "context7")
+		require.True(t, context7.Installed)
+		require.Equal(t, types.DashboardMarketplaceUpdateCurrent, context7.UpdateState)
+		require.NotNil(t, context7.Installation)
+		require.Equal(t, "context7", context7.Installation.ServerName)
+		require.Equal(t, "catalog:context7:remote", context7.Installation.InstalledDigest)
+		require.Equal(t, "catalog:context7:remote", context7.Installation.CatalogDigest)
+	})
+
+	t.Run("stored digest drift is update available", func(t *testing.T) {
+		db := newMarketplaceTestDB(t)
+		server, err := model.NewStreamableHTTPServer(
+			"context7",
+			"Current documentation lookup through Context7.",
+			"https://mcp.context7.com/mcp",
+			"",
+			nil,
+			"",
+		)
+		require.NoError(t, err)
+		require.NoError(t, db.Create(server).Error)
+		require.NoError(t, db.Create(&model.McpServerRegistrationSource{
+			ServerName:       "context7",
+			SourceType:       "marketplace",
+			SourceID:         "official-registry",
+			EntryID:          "context7",
+			InstalledVersion: "remote",
+			InstalledDigest:  "catalog:context7:old",
+			InstalledAt:      time.Now().UTC(),
+		}).Error)
+
+		resp, err := NewService(db, false).Marketplace()
+		require.NoError(t, err)
+
+		context7 := requireMarketplaceEntry(t, resp, "context7")
+		require.True(t, context7.Installed)
+		require.Equal(t, types.DashboardMarketplaceUpdateAvailable, context7.UpdateState)
+		require.NotNil(t, context7.Installation)
+		require.Equal(t, "catalog:context7:old", context7.Installation.InstalledDigest)
+		require.Equal(t, "catalog:context7:remote", context7.Installation.CatalogDigest)
+	})
+}
+
+func newMarketplaceTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.McpServer{}, &model.McpServerRegistrationSource{}))
+	return db
+}
+
+func requireMarketplaceEntry(t *testing.T, resp *types.DashboardMarketplaceResponse, id string) types.DashboardMarketplaceServer {
+	t.Helper()
+	for _, server := range resp.Servers {
+		if server.ID == id {
+			return server
+		}
+	}
+	t.Fatalf("marketplace entry %q not found", id)
+	return types.DashboardMarketplaceServer{}
 }

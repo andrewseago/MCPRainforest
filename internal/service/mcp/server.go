@@ -168,6 +168,9 @@ func (m *MCPService) DeregisterMcpServer(name string) error {
 	if err := m.db.Unscoped().Where("server_name = ?", name).Delete(&model.UpstreamOAuthPendingSession{}).Error; err != nil {
 		return fmt.Errorf("failed to remove pending upstream OAuth sessions for server %s: %w", name, err)
 	}
+	if err := m.db.Unscoped().Where("server_name = ?", name).Delete(&model.McpServerRegistrationSource{}).Error; err != nil {
+		return fmt.Errorf("failed to remove registration source for server %s: %w", name, err)
+	}
 
 	// Close any stateful session associated with this server
 	m.sessionManager.CloseSession(name)

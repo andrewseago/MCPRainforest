@@ -160,6 +160,13 @@ export type DashboardMarketplaceInstallStatus =
   | "external"
   | "blocked";
 
+export type DashboardMarketplaceUpdateState =
+  | "not_installed"
+  | "unknown"
+  | "current"
+  | "local_changes"
+  | "update_available";
+
 export interface DashboardMarketplaceSource {
   id: string;
   name: string;
@@ -182,6 +189,17 @@ export interface DashboardMarketplaceInstall {
   required_header_keys?: string[];
 }
 
+export interface DashboardMarketplaceInstallation {
+  server_name: string;
+  entry_id: string;
+  source_id: string;
+  installed_version?: string;
+  installed_digest?: string;
+  catalog_version?: string;
+  catalog_digest?: string;
+  installed_at?: string;
+}
+
 export interface DashboardMarketplaceServer {
   id: string;
   name: string;
@@ -201,6 +219,8 @@ export interface DashboardMarketplaceServer {
   install?: DashboardMarketplaceInstall;
   installed: boolean;
   installed_server_name?: string;
+  update_state: DashboardMarketplaceUpdateState;
+  installation?: DashboardMarketplaceInstallation;
   review_reasons?: string[];
   security_notes?: string[];
 }
@@ -222,6 +242,7 @@ export interface DashboardRegisterServerInput {
   args?: string[];
   env?: Record<string, string>;
   session_mode?: "stateless" | "stateful";
+  marketplace_entry_id?: string;
 }
 
 export interface DashboardCreateToolGroupInput {
