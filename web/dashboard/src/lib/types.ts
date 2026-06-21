@@ -193,3 +193,13 @@ export interface DashboardOAuthSessionResponse {
   expires_at?: string;
   error?: string;
 }
+
+export interface DashboardData {
+  overview?: DashboardOverviewResponse;
+  servers?: DashboardServersResponse;
+  tools?: DashboardToolsResponse;
+  toolGroups?: DashboardToolGroupsResponse;
+  prompts?: DashboardPromptsResponse;
+  resources?: DashboardResourcesResponse;
+  diagnostics?: DashboardDiagnosticsResponse;
+}
