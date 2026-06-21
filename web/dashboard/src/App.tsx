@@ -791,6 +791,7 @@ export default function App() {
   const { message: announcement, announce } = useAnnounce();
   const registerTitleId = "register-server-dialog-title";
   const toolGroupTitleId = "tool-group-dialog-title";
+  const [navOpen, setNavOpen] = useState(false);
 
   async function loadDashboardData(silent = false) {
     if (!silent) {
@@ -1590,9 +1591,33 @@ export default function App() {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <NavSidebar active={section} counts={navCounts} logoUrl={logoUrl} onSelect={setSection} />
+      <NavSidebar
+        active={section}
+        counts={navCounts}
+        logoUrl={logoUrl}
+        onClose={() => setNavOpen(false)}
+        onSelect={setSection}
+        open={navOpen}
+      />
       <main aria-busy={refreshing} className="main-shell" id="main-content" tabIndex={-1}>
         <header className="topbar">
+          <button
+            aria-controls="main-content"
+            aria-expanded={navOpen}
+            aria-label="Open navigation menu"
+            className="nav-toggle icon-button"
+            onClick={() => setNavOpen(true)}
+            type="button"
+          >
+            <svg aria-hidden="true" fill="none" height="20" viewBox="0 0 20 20" width="20">
+              <path
+                d="M3.5 5.5h13M3.5 10h13M3.5 14.5h13"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeWidth="1.6"
+              />
+            </svg>
+          </button>
           <div>
             <div className="topbar-status-row">
               {overview?.status ? (
