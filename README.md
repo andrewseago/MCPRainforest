@@ -1,8 +1,8 @@
 <h1 align="center">
-  MCPJungle
+  MCPRainforest
 </h1>
 <p align="center">
-  <strong>Run all your MCP servers behind one endpoint</strong>
+  <strong>A dashboard-focused fork of MCPJungle</strong>
 </p>
 <p align="center">
   <a href="https://docs.mcpjungle.com" style="text-decoration: none;">
@@ -17,6 +17,9 @@
     <img src="https://img.shields.io/badge/Discord-MCPJungle-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" style="max-width: 100%;">
   </a>
 </p>
+
+> [!NOTE]
+> MCPRainforest is a fork of [MCPJungle](https://github.com/mcpjungle/MCPJungle). The gateway, CLI, server, and MCP behavior are inherited from upstream unless this README or the code says otherwise. This fork currently focuses on a redesigned local dashboard experience.
 
 MCPJungle is a self-hosted MCP gateway for developers and teams who want to manage multiple MCP servers without scattered client configurations, duplicated setup, or inconsistent access control.
 
@@ -48,14 +51,24 @@ MCPJungle gives you a single control point:
 
 Start with a local setup. Scale to a shared team gateway when you need it.
 
-![MCPJungle dashboard UI](./docs/images/dashboard-ui.png)
+## MCPRainforest dashboard UI
+
+This fork includes a different dashboard UI from upstream MCPJungle. The dashboard now presents the local server as an operations console with:
+
+- Light, dark, and system theme modes.
+- Read-only sample MCP inventory when no real servers are registered, so the dashboard is useful to inspect immediately.
+- A populated server overview showing representative servers, tools, prompts, resources, and tool groups.
+- A stronger first viewport with gateway endpoint, status metrics, server inventory, endpoint shortcuts, recent discovery, and quick commands.
+- The same backend API and management flows for real registered servers.
+
+When real MCP servers are registered, the sample inventory is replaced by live dashboard data automatically.
 
 ## Documentation
- Mcpjungle documentation has a new home: [https://docs.mcpjungle.com](https://docs.mcpjungle.com).
- 
- Please prefer the docs site over this README for the latest guides, reference, and operational details.
- 
- Your AI Clients can also access the docs using its MCP server `https://docs.mcpjungle.com/mcp`!
+MCPRainforest currently uses the upstream MCPJungle documentation: [https://docs.mcpjungle.com](https://docs.mcpjungle.com).
+
+Use the upstream docs site for gateway, CLI, server, deployment, and MCP behavior. Use this README for fork-specific differences, especially the dashboard UI.
+
+Your AI clients can also access the upstream docs using its MCP server `https://docs.mcpjungle.com/mcp`.
 
 ## Quickstart
 
