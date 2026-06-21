@@ -2606,3 +2606,17 @@ html[data-theme="dark"] .modal-backdrop {
   font-size: 0.78rem;
   font-weight: 700;
 }
+
+.row-preview-code {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--muted-strong);
+  font-size: 0.78rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

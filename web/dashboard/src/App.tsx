@@ -2848,6 +2848,9 @@ export default function App() {
                                   <div className="clamped-description" title={promptDescription(prompt)}>
                                     {promptDescription(prompt)}
                                   </div>
+                                  {prompt.arguments_preview ? (
+                                    <code className="row-preview-code">{prompt.arguments_preview}</code>
+                                  ) : null}
                                 </td>
                                 <td>
                                   <div className="tool-state-line">
