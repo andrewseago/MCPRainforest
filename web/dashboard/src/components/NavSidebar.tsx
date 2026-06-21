@@ -88,6 +88,7 @@ export function NavSidebar({
       <nav className="nav-list" aria-label="Dashboard sections">
         {items.map((item) => (
           <button
+            aria-current={active === item.key ? "page" : undefined}
             className={`nav-item ${active === item.key ? "is-active" : ""}`}
             key={item.key}
             onClick={() => onSelect(item.key)}

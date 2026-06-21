@@ -2456,3 +2456,26 @@ html[data-theme="dark"] .modal-backdrop {
   white-space: nowrap;
   border: 0;
 }
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  text-decoration: none;
+  box-shadow: var(--shadow);
+  transition: top 140ms ease;
+}
+
+.skip-link:focus-visible {
+  top: 12px;
+}
+
+.main-shell:focus {
+  outline: none;
+}

@@ -1558,8 +1558,11 @@ export default function App() {
   return (
     <div className="app-shell">
       <Announcer message={announcement} />
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <NavSidebar active={section} counts={navCounts} logoUrl={logoUrl} onSelect={setSection} />
-      <main className="main-shell">
+      <main aria-busy={refreshing} className="main-shell" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div>
             <div className="topbar-status-row">
