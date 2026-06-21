@@ -1610,9 +1610,26 @@ export default function App() {
         </header>
 
         {feedback ? (
-          <section className={`feedback-banner feedback-${feedback.tone}`}>
-            <strong>{feedback.tone === "success" ? "Updated" : "Request failed"}</strong>
-            <span>{feedback.message}</span>
+          <section className={`feedback-banner feedback-${feedback.tone}`} role="status">
+            <div className="feedback-banner-text">
+              <strong>{feedback.tone === "success" ? "Updated" : "Request failed"}</strong>
+              <span>{feedback.message}</span>
+            </div>
+            <button
+              aria-label="Dismiss message"
+              className="feedback-dismiss icon-button"
+              onClick={() => setFeedback(null)}
+              type="button"
+            >
+              <svg aria-hidden="true" fill="none" height="16" viewBox="0 0 16 16" width="16">
+                <path
+                  d="m4 4 8 8M12 4l-8 8"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="1.5"
+                />
+              </svg>
+            </button>
           </section>
         ) : null}
 
