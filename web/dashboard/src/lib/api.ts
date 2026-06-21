@@ -39,6 +39,31 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+export interface MarketplaceQueryParams {
+  q?: string;
+  source_id?: string;
+  transport?: string;
+  install_status?: string;
+  update_state?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+function buildQueryString(params?: MarketplaceQueryParams) {
+  if (!params) {
+    return "";
+  }
+  const values = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === "" || value === "all") {
+      return;
+    }
+    values.set(key, String(value));
+  });
+  const query = values.toString();
+  return query ? `?${query}` : "";
+}
+
 export const api = {
   overview: () => requestJSON<DashboardOverviewResponse>("/api/dashboard/overview"),
   servers: () => requestJSON<DashboardServersResponse>("/api/dashboard/servers"),
@@ -47,7 +72,8 @@ export const api = {
   prompts: () => requestJSON<DashboardPromptsResponse>("/api/dashboard/prompts"),
   resources: () => requestJSON<DashboardResourcesResponse>("/api/dashboard/resources"),
   diagnostics: () => requestJSON<DashboardDiagnosticsResponse>("/api/dashboard/diagnostics"),
-  marketplace: () => requestJSON<DashboardMarketplaceResponse>("/api/dashboard/marketplace"),
+  marketplace: (params?: MarketplaceQueryParams) =>
+    requestJSON<DashboardMarketplaceResponse>(`/api/dashboard/marketplace${buildQueryString(params)}`),
   registerServer: (body: DashboardRegisterServerInput) =>
     requestJSON<DashboardRegisterServerResponse>("/api/dashboard/servers", {
       method: "POST",

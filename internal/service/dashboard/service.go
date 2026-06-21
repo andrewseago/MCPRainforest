@@ -2,9 +2,11 @@ package dashboard
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mcpjungle/mcpjungle/internal/model"
@@ -14,12 +16,24 @@ import (
 )
 
 type Service struct {
-	db             *gorm.DB
-	metricsEnabled bool
+	db                               *gorm.DB
+	metricsEnabled                   bool
+	marketplaceHTTPClient            *http.Client
+	marketplaceRegistryURL           string
+	marketplaceAllowInsecureRegistry bool
+	marketplaceCacheTTL              time.Duration
+	marketplaceCacheMu               sync.Mutex
+	marketplaceCache                 marketplaceSourceCache
 }
 
 func NewService(db *gorm.DB, metricsEnabled bool) *Service {
-	return &Service{db: db, metricsEnabled: metricsEnabled}
+	return &Service{
+		db:                     db,
+		metricsEnabled:         metricsEnabled,
+		marketplaceHTTPClient:  &http.Client{Timeout: 8 * time.Second},
+		marketplaceRegistryURL: "https://registry.modelcontextprotocol.io/v0/servers",
+		marketplaceCacheTTL:    10 * time.Minute,
+	}
 }
 
 type serverInventory struct {

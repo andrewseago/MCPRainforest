@@ -167,6 +167,11 @@ type DashboardMarketplaceSource struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	TrustLevel  string `json:"trust_level,omitempty"`
+	Status      string `json:"status,omitempty"`
+	ServerCount int    `json:"server_count,omitempty"`
+	LoadedAt    string `json:"loaded_at,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Searchable  bool   `json:"searchable,omitempty"`
 }
 
 type DashboardMarketplaceInstall struct {
@@ -222,5 +227,23 @@ type DashboardMarketplaceServer struct {
 type DashboardMarketplaceResponse struct {
 	Sources    []DashboardMarketplaceSource `json:"sources"`
 	Servers    []DashboardMarketplaceServer `json:"servers"`
+	Query      DashboardMarketplaceQuery    `json:"query,omitempty"`
+	Pagination DashboardMarketplacePage     `json:"pagination,omitempty"`
 	EmptyState *DashboardEmptyState         `json:"empty_state,omitempty"`
+}
+
+type DashboardMarketplaceQuery struct {
+	Search        string `json:"q,omitempty"`
+	SourceID      string `json:"source_id,omitempty"`
+	Transport     string `json:"transport,omitempty"`
+	InstallStatus string `json:"install_status,omitempty"`
+	UpdateState   string `json:"update_state,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
+	Cursor        string `json:"cursor,omitempty"`
+}
+
+type DashboardMarketplacePage struct {
+	Limit      int    `json:"limit,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	Total      int    `json:"total,omitempty"`
 }

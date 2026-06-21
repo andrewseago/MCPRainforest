@@ -17,7 +17,8 @@ type dashboardToggleRequest struct {
 
 type dashboardRegisterServerRequest struct {
 	types.RegisterServerInput
-	MarketplaceEntryID string `json:"marketplace_entry_id,omitempty"`
+	MarketplaceSourceID string `json:"marketplace_source_id,omitempty"`
+	MarketplaceEntryID  string `json:"marketplace_entry_id,omitempty"`
 }
 
 type dashboardRegisterServerResponse struct {
@@ -45,7 +46,7 @@ func (s *Server) dashboardRegisterServerHandler() gin.HandlerFunc {
 		}
 		input := request.RegisterServerInput
 
-		if err := s.dashboardService.ValidateMarketplaceRegistration(request.MarketplaceEntryID, &input); err != nil {
+		if err := s.dashboardService.ValidateMarketplaceRegistration(c.Request.Context(), request.MarketplaceSourceID, request.MarketplaceEntryID, &input); err != nil {
 			handleServiceError(c, err)
 			return
 		}
@@ -79,7 +80,7 @@ func (s *Server) dashboardRegisterServerHandler() gin.HandlerFunc {
 			return
 		}
 
-		if err := s.dashboardService.RecordMarketplaceInstallation(server.Name, request.MarketplaceEntryID); err != nil {
+		if err := s.dashboardService.RecordMarketplaceInstallation(c.Request.Context(), server.Name, request.MarketplaceSourceID, request.MarketplaceEntryID); err != nil {
 			handleServiceError(c, err)
 			return
 		}

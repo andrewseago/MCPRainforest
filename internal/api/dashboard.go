@@ -2,9 +2,11 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mcpjungle/mcpjungle/internal/model"
+	"github.com/mcpjungle/mcpjungle/internal/service/dashboard"
 )
 
 func (s *Server) dashboardOverviewHandler() gin.HandlerFunc {
@@ -77,7 +79,17 @@ func (s *Server) dashboardDiagnosticsHandler() gin.HandlerFunc {
 
 func (s *Server) dashboardMarketplaceHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		resp, err := s.dashboardService.Marketplace()
+		limit, _ := strconv.Atoi(c.Query("limit"))
+		resp, err := s.dashboardService.MarketplaceWithQuery(c.Request.Context(), dashboard.MarketplaceQuery{
+			Search:        c.Query("q"),
+			SourceID:      c.Query("source_id"),
+			Transport:     c.Query("transport"),
+			InstallStatus: c.Query("install_status"),
+			UpdateState:   c.Query("update_state"),
+			Limit:         limit,
+			Cursor:        c.Query("cursor"),
+			LoadSources:   true,
+		})
 		if err != nil {
 			handleServiceError(c, err)
 			return

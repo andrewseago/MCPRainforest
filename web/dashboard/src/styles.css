@@ -1259,8 +1259,47 @@ button:disabled {
   max-width: min(100%, 980px);
 }
 
+.marketplace-source-health {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--surface-muted);
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.marketplace-source-warning {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 100, 18, 0.2);
+  border-radius: 8px;
+  color: var(--warn);
+  background: rgba(139, 100, 18, 0.08);
+  font-size: 0.9rem;
+}
+
 .marketplace-table td {
   vertical-align: middle;
+}
+
+.marketplace-source-cell,
+.marketplace-source-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.marketplace-source-detail {
+  color: var(--muted-strong);
+}
+
+.source-error-line {
+  color: var(--bad);
 }
 
 .marketplace-category-cell {

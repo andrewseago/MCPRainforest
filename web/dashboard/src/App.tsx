@@ -77,6 +77,7 @@ interface RegisterServerFormState {
   url: string;
   bearer_token: string;
   header_rows: KeyValueRow[];
+  marketplace_source_id?: string;
   marketplace_entry_id?: string;
 }
 
@@ -190,6 +191,34 @@ function marketplaceUpdateTone(value?: string) {
     return "warn" as const;
   }
   if (value === "unknown") {
+    return "muted" as const;
+  }
+  return "muted" as const;
+}
+
+function marketplaceSourceStatusLabel(value?: string) {
+  switch (value) {
+    case "loaded":
+      return "loaded";
+    case "error":
+      return "error";
+    case "metadata_only":
+      return "metadata only";
+    case "local":
+      return "local";
+    default:
+      return "unknown";
+  }
+}
+
+function marketplaceSourceStatusTone(value?: string) {
+  if (value === "loaded" || value === "local") {
+    return "good" as const;
+  }
+  if (value === "error") {
+    return "bad" as const;
+  }
+  if (value === "metadata_only") {
     return "muted" as const;
   }
   return "muted" as const;
@@ -468,6 +497,7 @@ function marketplaceDraftToRegisterForm(entry: DashboardMarketplaceServer): Regi
     env_rows: keyedRows(draft.env, draft.required_env_keys),
     url: draft.url ?? "",
     header_rows: keyedRows(draft.headers, draft.required_header_keys),
+    marketplace_source_id: entry.source_id,
     marketplace_entry_id: entry.id,
   };
 }
@@ -512,6 +542,7 @@ function buildRegisterPayload(form: RegisterServerFormState): DashboardRegisterS
     session_mode: form.session_mode,
   };
   if (form.marketplace_entry_id) {
+    payload.marketplace_source_id = form.marketplace_source_id;
     payload.marketplace_entry_id = form.marketplace_entry_id;
   }
 
@@ -872,6 +903,14 @@ export default function App() {
     [marketplaceData?.sources],
   );
 
+  const marketplaceSourceHealth = useMemo(() => {
+    const sources = marketplaceData?.sources ?? [];
+    const errorCount = sources.filter((source) => source.status === "error").length;
+    const loadedCount = sources.filter((source) => source.status === "loaded" || source.status === "local").length;
+    const visibleServerCount = marketplaceData?.pagination?.total ?? marketplaceData?.servers.length ?? 0;
+    return { errorCount, loadedCount, visibleServerCount };
+  }, [marketplaceData?.pagination?.total, marketplaceData?.servers.length, marketplaceData?.sources]);
+
   const marketplaceTransports = useMemo(() => {
     const transports = new Set((marketplaceData?.servers ?? []).map((server) => server.transport));
     return Array.from(transports).sort();
@@ -914,7 +953,9 @@ export default function App() {
         server.publisher?.toLowerCase().includes(term) ||
         server.category?.toLowerCase().includes(term) ||
         server.tags?.some((tag) => tag.toLowerCase().includes(term)) ||
-        source?.name.toLowerCase().includes(term)
+        source?.name.toLowerCase().includes(term) ||
+        source?.description?.toLowerCase().includes(term) ||
+        source?.trust_level?.toLowerCase().includes(term)
       );
     });
   }, [
@@ -1905,6 +1946,11 @@ export default function App() {
                         </option>
                       ))}
                     </select>
+                    <span className="marketplace-source-health" title="Marketplace source health">
+                      {marketplaceSourceHealth.errorCount > 0
+                        ? `${marketplaceSourceHealth.errorCount} source errors`
+                        : `${marketplaceSourceHealth.loadedCount} sources loaded`}
+                    </span>
                   </div>
                 }
               >
@@ -1942,8 +1988,14 @@ export default function App() {
                     title="No marketplace entries"
                   />
                 ) : (
-                  <div className="tools-table-wrap">
-                    <table className="data-table compact-table marketplace-table">
+                  <>
+                    {marketplaceSourceHealth.errorCount > 0 ? (
+                      <div className="marketplace-source-warning">
+                        Some marketplace sources failed; showing loaded entries.
+                      </div>
+                    ) : null}
+                    <div className="tools-table-wrap">
+                      <table className="data-table compact-table marketplace-table">
                       <thead>
                         <tr>
                           <th aria-hidden="true" className="expand-column"></th>
@@ -1977,7 +2029,17 @@ export default function App() {
                                   <div className="table-primary">{marketplaceDisplayName(entry)}</div>
                                   <div className="table-secondary">{entry.publisher || "Unknown publisher"}</div>
                                 </td>
-                                <td>{source?.name ?? entry.source_id}</td>
+                                <td>
+                                  <div className="marketplace-source-cell">
+                                    <span>{source?.name ?? entry.source_id}</span>
+                                    {source?.status && source.status !== "loaded" && source.status !== "local" ? (
+                                      <StatusBadge
+                                        text={marketplaceSourceStatusLabel(source.status)}
+                                        tone={marketplaceSourceStatusTone(source.status)}
+                                      />
+                                    ) : null}
+                                  </div>
+                                </td>
                                 <td>
                                   <div className="marketplace-category-cell">
                                     <span>{entry.category || "Uncategorized"}</span>
@@ -2025,7 +2087,20 @@ export default function App() {
                                         </div>
                                         <div>
                                           <dt>Source</dt>
-                                          <dd>{source?.name ?? entry.source_id}</dd>
+                                          <dd>
+                                            <div className="marketplace-source-detail">
+                                              <span>{source?.name ?? entry.source_id}</span>
+                                              {source?.status ? (
+                                                <StatusBadge
+                                                  text={marketplaceSourceStatusLabel(source.status)}
+                                                  tone={marketplaceSourceStatusTone(source.status)}
+                                                />
+                                              ) : null}
+                                              <span>{source?.server_count ?? 0} entries</span>
+                                              {source?.loaded_at ? <span>Loaded {source.loaded_at}</span> : null}
+                                              {source?.error ? <span className="source-error-line">{source.error}</span> : null}
+                                            </div>
+                                          </dd>
                                         </div>
                                         <div>
                                           <dt>Publisher</dt>
@@ -2213,8 +2288,9 @@ export default function App() {
                           );
                         })}
                       </tbody>
-                    </table>
-                  </div>
+                      </table>
+                    </div>
+                  </>
                 )}
               </SectionCard>
             ) : null}

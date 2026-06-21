@@ -1,11 +1,20 @@
 package dashboard
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mcpjungle/mcpjungle/internal/model"
 	"github.com/mcpjungle/mcpjungle/pkg/apierrors"
@@ -13,21 +22,89 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	defaultMarketplaceLimit        = 100
+	maxMarketplaceLimit            = 250
+	marketplaceRegistryFetchLimit  = 100
+	maxMarketplaceRegistryBodySize = 1 << 20
+)
+
+type MarketplaceQuery struct {
+	Search        string
+	SourceID      string
+	Transport     string
+	InstallStatus string
+	UpdateState   string
+	Limit         int
+	Cursor        string
+	LoadSources   bool
+}
+
+type marketplaceSourceCache struct {
+	fetchedAt time.Time
+	servers   []types.DashboardMarketplaceServer
+}
+
 // Marketplace returns a curated, dry-run catalog for the dashboard. Entries are
 // registration drafts only; callers must still review and submit through the
 // existing server registration path.
 func (s *Service) Marketplace() (*types.DashboardMarketplaceResponse, error) {
+	return s.MarketplaceWithQuery(context.Background(), MarketplaceQuery{})
+}
+
+// MarketplaceWithQuery returns the dashboard marketplace catalog. When
+// LoadSources is true it refreshes configured live sources and merges them with
+// the curated local catalog; source failures are reported in source metadata
+// without failing the whole response.
+func (s *Service) MarketplaceWithQuery(ctx context.Context, query MarketplaceQuery) (*types.DashboardMarketplaceResponse, error) {
+	query = normalizeMarketplaceQuery(query)
+	sources := marketplaceSources()
+	servers := marketplaceServers()
+
+	sourceCounts := countMarketplaceServersBySource(servers)
+	if query.LoadSources {
+		loadedServers, fetchedAt, err := s.loadOfficialRegistryMarketplace(ctx)
+		if err != nil {
+			markMarketplaceSourceError(sources, "official-registry", fmt.Sprintf("official registry refresh failed: %v", err), sourceCounts["official-registry"])
+		} else {
+			servers = mergeMarketplaceServers(servers, loadedServers)
+			sourceCounts["official-registry"] = len(loadedServers)
+			markMarketplaceSourceLoaded(sources, "official-registry", len(loadedServers), fetchedAt)
+		}
+		markMarketplaceSourceMetadataOnly(sources, sourceCounts)
+	} else {
+		markMarketplaceSourceLocal(sources, sourceCounts)
+	}
+
 	resp := &types.DashboardMarketplaceResponse{
-		Sources: marketplaceSources(),
-		Servers: marketplaceServers(),
+		Sources: sources,
+		Query: types.DashboardMarketplaceQuery{
+			Search:        query.Search,
+			SourceID:      query.SourceID,
+			Transport:     query.Transport,
+			InstallStatus: query.InstallStatus,
+			UpdateState:   query.UpdateState,
+			Limit:         query.Limit,
+			Cursor:        query.Cursor,
+		},
 	}
 
 	installed, err := s.installedMarketplaceServers()
 	if err != nil {
 		return nil, err
 	}
-	for index := range resp.Servers {
-		annotateMarketplaceInstallation(&resp.Servers[index], installed)
+	for index := range servers {
+		annotateMarketplaceInstallation(&servers[index], installed)
+	}
+
+	sourceByID := mapMarketplaceSourcesByID(resp.Sources)
+	filtered := filterMarketplaceServers(servers, query, sourceByID)
+	total := len(filtered)
+	resp.Servers = paginateMarketplaceServers(filtered, query)
+	resp.Pagination = types.DashboardMarketplacePage{
+		Limit:      query.Limit,
+		NextCursor: nextMarketplaceCursor(query, total),
+		Total:      total,
 	}
 
 	if len(resp.Servers) == 0 {
@@ -38,6 +115,195 @@ func (s *Service) Marketplace() (*types.DashboardMarketplaceResponse, error) {
 		)
 	}
 	return resp, nil
+}
+
+func normalizeMarketplaceQuery(query MarketplaceQuery) MarketplaceQuery {
+	query.Search = strings.TrimSpace(query.Search)
+	query.SourceID = strings.TrimSpace(query.SourceID)
+	query.Transport = strings.TrimSpace(query.Transport)
+	query.InstallStatus = strings.TrimSpace(query.InstallStatus)
+	query.UpdateState = strings.TrimSpace(query.UpdateState)
+	query.Cursor = strings.TrimSpace(query.Cursor)
+	if query.Limit <= 0 {
+		query.Limit = defaultMarketplaceLimit
+	}
+	if query.Limit > maxMarketplaceLimit {
+		query.Limit = maxMarketplaceLimit
+	}
+	return query
+}
+
+func countMarketplaceServersBySource(servers []types.DashboardMarketplaceServer) map[string]int {
+	counts := map[string]int{}
+	for _, server := range servers {
+		counts[server.SourceID]++
+	}
+	return counts
+}
+
+func mapMarketplaceSourcesByID(sources []types.DashboardMarketplaceSource) map[string]types.DashboardMarketplaceSource {
+	byID := map[string]types.DashboardMarketplaceSource{}
+	for _, source := range sources {
+		byID[source.ID] = source
+	}
+	return byID
+}
+
+func markMarketplaceSourceLoaded(sources []types.DashboardMarketplaceSource, sourceID string, count int, fetchedAt time.Time) {
+	for index := range sources {
+		if sources[index].ID != sourceID {
+			continue
+		}
+		sources[index].Status = "loaded"
+		sources[index].ServerCount = count
+		sources[index].LoadedAt = formatTime(fetchedAt)
+		sources[index].Error = ""
+		sources[index].Searchable = true
+	}
+}
+
+func markMarketplaceSourceError(sources []types.DashboardMarketplaceSource, sourceID string, message string, count int) {
+	for index := range sources {
+		if sources[index].ID != sourceID {
+			continue
+		}
+		sources[index].Status = "error"
+		sources[index].ServerCount = count
+		sources[index].Error = message
+		sources[index].Searchable = true
+	}
+}
+
+func markMarketplaceSourceMetadataOnly(sources []types.DashboardMarketplaceSource, counts map[string]int) {
+	for index := range sources {
+		if sources[index].Status != "" {
+			continue
+		}
+		sources[index].Status = "metadata_only"
+		sources[index].ServerCount = counts[sources[index].ID]
+		sources[index].Searchable = false
+	}
+}
+
+func markMarketplaceSourceLocal(sources []types.DashboardMarketplaceSource, counts map[string]int) {
+	for index := range sources {
+		sources[index].Status = "local"
+		sources[index].ServerCount = counts[sources[index].ID]
+		sources[index].Searchable = true
+	}
+}
+
+func mergeMarketplaceServers(local, loaded []types.DashboardMarketplaceServer) []types.DashboardMarketplaceServer {
+	merged := make([]types.DashboardMarketplaceServer, 0, len(local)+len(loaded))
+	seen := map[string]bool{}
+	for _, entry := range local {
+		key := marketplaceEntryKey(entry.SourceID, entry.ID)
+		seen[key] = true
+		merged = append(merged, entry)
+	}
+	for _, entry := range loaded {
+		key := marketplaceEntryKey(entry.SourceID, entry.ID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, entry)
+	}
+	sortMarketplaceServers(merged)
+	return merged
+}
+
+func marketplaceEntryKey(sourceID, entryID string) string {
+	return sourceID + "\x00" + entryID
+}
+
+func filterMarketplaceServers(
+	servers []types.DashboardMarketplaceServer,
+	query MarketplaceQuery,
+	sourceByID map[string]types.DashboardMarketplaceSource,
+) []types.DashboardMarketplaceServer {
+	filtered := make([]types.DashboardMarketplaceServer, 0, len(servers))
+	search := strings.ToLower(query.Search)
+	for _, entry := range servers {
+		if query.SourceID != "" && entry.SourceID != query.SourceID {
+			continue
+		}
+		if query.Transport != "" && entry.Transport != query.Transport {
+			continue
+		}
+		if query.InstallStatus != "" && string(entry.InstallStatus) != query.InstallStatus {
+			continue
+		}
+		if query.UpdateState != "" && string(entry.UpdateState) != query.UpdateState {
+			continue
+		}
+		if search != "" && !marketplaceEntryMatchesSearch(entry, sourceByID[entry.SourceID], search) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	sortMarketplaceServers(filtered)
+	return filtered
+}
+
+func marketplaceEntryMatchesSearch(entry types.DashboardMarketplaceServer, source types.DashboardMarketplaceSource, search string) bool {
+	values := []string{
+		entry.ID,
+		entry.Name,
+		entry.DisplayName,
+		entry.Description,
+		entry.Publisher,
+		entry.Category,
+		entry.Transport,
+		entry.AuthType,
+		entry.HomepageURL,
+		entry.PackageURL,
+		source.Name,
+		source.Description,
+		source.TrustLevel,
+	}
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(value), search) {
+			return true
+		}
+	}
+	for _, tag := range entry.Tags {
+		if strings.Contains(strings.ToLower(tag), search) {
+			return true
+		}
+	}
+	return false
+}
+
+func paginateMarketplaceServers(servers []types.DashboardMarketplaceServer, query MarketplaceQuery) []types.DashboardMarketplaceServer {
+	offset := marketplaceCursorOffset(query.Cursor)
+	if offset >= len(servers) {
+		return []types.DashboardMarketplaceServer{}
+	}
+	end := offset + query.Limit
+	if end > len(servers) {
+		end = len(servers)
+	}
+	return servers[offset:end]
+}
+
+func nextMarketplaceCursor(query MarketplaceQuery, total int) string {
+	next := marketplaceCursorOffset(query.Cursor) + query.Limit
+	if next >= total {
+		return ""
+	}
+	return strconv.Itoa(next)
+}
+
+func marketplaceCursorOffset(cursor string) int {
+	if cursor == "" {
+		return 0
+	}
+	offset, err := strconv.Atoi(cursor)
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 type installedMarketplaceServer struct {
@@ -83,7 +349,9 @@ func annotateMarketplaceInstallation(entry *types.DashboardMarketplaceServer, in
 
 	entry.Installed = true
 	entry.InstalledServerName = installedServer.Server.Name
-	if installedServer.Source == nil || installedServer.Source.EntryID != entry.ID {
+	if installedServer.Source == nil ||
+		installedServer.Source.EntryID != entry.ID ||
+		installedServer.Source.SourceID != entry.SourceID {
 		entry.UpdateState = types.DashboardMarketplaceUpdateUnknown
 		return
 	}
@@ -164,11 +432,456 @@ func mapKeysEqual(left, right map[string]string) bool {
 	return true
 }
 
-func (s *Service) ValidateMarketplaceRegistration(entryID string, input *types.RegisterServerInput) error {
+func mapKeysContain(left, right map[string]string) bool {
+	for key := range right {
+		if _, ok := left[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+type officialRegistryResponse struct {
+	Servers  []officialRegistryRecord `json:"servers"`
+	Metadata struct {
+		NextCursor string `json:"nextCursor"`
+		Count      int    `json:"count"`
+	} `json:"metadata"`
+}
+
+type officialRegistryRecord struct {
+	Server officialRegistryServer       `json:"server"`
+	Meta   officialRegistryMetaEnvelope `json:"_meta"`
+}
+
+type officialRegistryMetaEnvelope struct {
+	Official officialRegistryOfficialMeta `json:"io.modelcontextprotocol.registry/official"`
+}
+
+type officialRegistryOfficialMeta struct {
+	Status   string `json:"status"`
+	IsLatest bool   `json:"isLatest"`
+}
+
+type officialRegistryServer struct {
+	Name        string                    `json:"name"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	Version     string                    `json:"version"`
+	WebsiteURL  string                    `json:"websiteUrl"`
+	Repository  officialRegistryRepo      `json:"repository"`
+	Remotes     []officialRegistryRemote  `json:"remotes"`
+	Packages    []officialRegistryPackage `json:"packages"`
+}
+
+type officialRegistryRepo struct {
+	URL    string `json:"url"`
+	Source string `json:"source"`
+}
+
+type officialRegistryRemote struct {
+	Type    string                   `json:"type"`
+	URL     string                   `json:"url"`
+	Headers []officialRegistryHeader `json:"headers"`
+}
+
+type officialRegistryHeader struct {
+	Name       string `json:"name"`
+	IsRequired bool   `json:"isRequired"`
+	IsSecret   bool   `json:"isSecret"`
+}
+
+type officialRegistryPackage struct {
+	RegistryType string                           `json:"registryType"`
+	Identifier   string                           `json:"identifier"`
+	Version      string                           `json:"version"`
+	Transport    officialRegistryPackageTransport `json:"transport"`
+}
+
+type officialRegistryPackageTransport struct {
+	Type string `json:"type"`
+}
+
+func (s *Service) loadOfficialRegistryMarketplace(ctx context.Context) ([]types.DashboardMarketplaceServer, time.Time, error) {
+	if s == nil {
+		return nil, time.Time{}, fmt.Errorf("dashboard service is unavailable")
+	}
+	if s.marketplaceHTTPClient == nil {
+		s.marketplaceHTTPClient = &http.Client{Timeout: 8 * time.Second}
+	}
+	if s.marketplaceCacheTTL <= 0 {
+		s.marketplaceCacheTTL = 10 * time.Minute
+	}
+
+	now := time.Now().UTC()
+	s.marketplaceCacheMu.Lock()
+	if !s.marketplaceCache.fetchedAt.IsZero() && now.Sub(s.marketplaceCache.fetchedAt) < s.marketplaceCacheTTL {
+		cached := cloneMarketplaceServers(s.marketplaceCache.servers)
+		fetchedAt := s.marketplaceCache.fetchedAt
+		s.marketplaceCacheMu.Unlock()
+		return cached, fetchedAt, nil
+	}
+	s.marketplaceCacheMu.Unlock()
+
+	registryURL, err := s.officialRegistryURL()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, registryURL, nil)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "MCPRainforest marketplace")
+
+	resp, err := s.marketplaceHTTPClient.Do(req)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, time.Time{}, fmt.Errorf("official registry returned %s", resp.Status)
+	}
+
+	var payload officialRegistryResponse
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxMarketplaceRegistryBodySize))
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, time.Time{}, fmt.Errorf("decode official registry response: %w", err)
+	}
+	servers := normalizeOfficialRegistryServers(payload.Servers)
+	fetchedAt := time.Now().UTC()
+
+	s.marketplaceCacheMu.Lock()
+	s.marketplaceCache = marketplaceSourceCache{
+		fetchedAt: fetchedAt,
+		servers:   cloneMarketplaceServers(servers),
+	}
+	s.marketplaceCacheMu.Unlock()
+
+	return servers, fetchedAt, nil
+}
+
+func (s *Service) officialRegistryURL() (string, error) {
+	rawURL := strings.TrimSpace(s.marketplaceRegistryURL)
+	if rawURL == "" {
+		rawURL = "https://registry.modelcontextprotocol.io/v0/servers"
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse official registry URL: %w", err)
+	}
+	if parsed.Scheme != "https" && !(s.marketplaceAllowInsecureRegistry && parsed.Scheme == "http") {
+		return "", fmt.Errorf("official registry URL must use https")
+	}
+	if !s.marketplaceAllowInsecureRegistry && parsed.Host != "registry.modelcontextprotocol.io" {
+		return "", fmt.Errorf("official registry host is not allowlisted")
+	}
+	values := parsed.Query()
+	if values.Get("limit") == "" {
+		values.Set("limit", strconv.Itoa(marketplaceRegistryFetchLimit))
+	}
+	parsed.RawQuery = values.Encode()
+	parsed.Fragment = ""
+	parsed.User = nil
+	return parsed.String(), nil
+}
+
+func cloneMarketplaceServers(servers []types.DashboardMarketplaceServer) []types.DashboardMarketplaceServer {
+	cloned := make([]types.DashboardMarketplaceServer, len(servers))
+	copy(cloned, servers)
+	return cloned
+}
+
+func normalizeOfficialRegistryServers(records []officialRegistryRecord) []types.DashboardMarketplaceServer {
+	servers := make([]types.DashboardMarketplaceServer, 0, len(records))
+	for _, record := range records {
+		if record.Meta.Official.Status != "" && record.Meta.Official.Status != "active" {
+			continue
+		}
+		if !record.Meta.Official.IsLatest {
+			continue
+		}
+		entry, ok := normalizeOfficialRegistryServer(record)
+		if !ok {
+			continue
+		}
+		servers = append(servers, entry)
+	}
+	sortMarketplaceServers(servers)
+	return servers
+}
+
+func normalizeOfficialRegistryServer(record officialRegistryRecord) (types.DashboardMarketplaceServer, bool) {
+	manifest := record.Server
+	if strings.TrimSpace(manifest.Name) == "" {
+		return types.DashboardMarketplaceServer{}, false
+	}
+
+	entry := types.DashboardMarketplaceServer{
+		ID:            manifest.Name,
+		Name:          marketplaceInstallName(manifest.Name),
+		DisplayName:   marketplaceDisplayTitle(manifest),
+		Description:   strings.TrimSpace(manifest.Description),
+		SourceID:      "official-registry",
+		Publisher:     marketplacePublisher(manifest),
+		Version:       strings.TrimSpace(manifest.Version),
+		Digest:        officialRegistryDigest(manifest),
+		Category:      "Registry",
+		Tags:          []string{"official-registry"},
+		AuthType:      "none",
+		HomepageURL:   strings.TrimSpace(manifest.WebsiteURL),
+		PackageURL:    strings.TrimSpace(manifest.Repository.URL),
+		InstallStatus: types.DashboardMarketplaceExternal,
+		SecurityNotes: []string{
+			"Imported from the official MCP Registry as discovery metadata.",
+			"No catalog-supplied secret values are imported.",
+		},
+	}
+	if entry.Description == "" {
+		entry.Description = "Official MCP Registry entry."
+	}
+
+	if remote, ok := firstSupportedRegistryRemote(manifest.Remotes); ok {
+		applyRegistryRemoteInstall(&entry, remote)
+		return entry, true
+	}
+	if pkg, ok := firstSupportedRegistryPackage(manifest.Packages); ok {
+		applyRegistryPackageInstall(&entry, pkg)
+		return entry, true
+	}
+
+	entry.ReviewReasons = []string{"No supported MCP transport or install package was declared by the registry entry."}
+	entry.SecurityNotes = append(entry.SecurityNotes, "Register this server manually after reviewing upstream setup documentation.")
+	return entry, true
+}
+
+func firstSupportedRegistryRemote(remotes []officialRegistryRemote) (officialRegistryRemote, bool) {
+	for _, remote := range remotes {
+		if registryRemoteTransport(remote.Type) == "" {
+			continue
+		}
+		if !isHTTPSURL(remote.URL) {
+			continue
+		}
+		return remote, true
+	}
+	return officialRegistryRemote{}, false
+}
+
+func firstSupportedRegistryPackage(packages []officialRegistryPackage) (officialRegistryPackage, bool) {
+	for _, pkg := range packages {
+		if registryPackageTransport(pkg.Transport.Type) == "" || strings.TrimSpace(pkg.Identifier) == "" {
+			continue
+		}
+		return pkg, true
+	}
+	return officialRegistryPackage{}, false
+}
+
+func applyRegistryRemoteInstall(entry *types.DashboardMarketplaceServer, remote officialRegistryRemote) {
+	transport := registryRemoteTransport(remote.Type)
+	requiredHeaders := registryRequiredHeaderKeys(remote.Headers)
+	entry.Transport = transport
+	entry.PackageURL = firstNonEmpty(entry.PackageURL, remote.URL)
+	entry.Tags = append(entry.Tags, "remote", transport)
+	entry.Install = &types.DashboardMarketplaceInstall{
+		Name:               entry.Name,
+		Description:        entry.Description,
+		Transport:          transport,
+		SessionMode:        string(types.SessionModeStateless),
+		URL:                remote.URL,
+		Headers:            emptyValueMap(requiredHeaders),
+		RequiredHeaderKeys: requiredHeaders,
+	}
+	if len(requiredHeaders) > 0 {
+		entry.AuthType = "headers"
+		entry.InstallStatus = types.DashboardMarketplaceReviewRequired
+		entry.ReviewReasons = []string{"Remote registry entry requires caller-supplied header values before registration."}
+		entry.SecurityNotes = append(entry.SecurityNotes, "Required header names are shown, but secret values must be supplied locally.")
+		return
+	}
+	entry.InstallStatus = types.DashboardMarketplaceInstallable
+	entry.ReviewReasons = []string{"Remote HTTPS endpoint with no registry-declared secret requirements."}
+}
+
+func applyRegistryPackageInstall(entry *types.DashboardMarketplaceServer, pkg officialRegistryPackage) {
+	transport := registryPackageTransport(pkg.Transport.Type)
+	entry.Transport = transport
+	entry.AuthType = "none"
+	entry.Tags = append(entry.Tags, strings.ToLower(pkg.RegistryType), transport, "package")
+	entry.PackageURL = firstNonEmpty(registryPackageURL(pkg), entry.PackageURL)
+	entry.InstallStatus = types.DashboardMarketplaceReviewRequired
+	entry.ReviewReasons = []string{
+		"Package registry entries run a local process on the MCPRainforest host.",
+		"Review package provenance and command arguments before registration.",
+	}
+	entry.Install = &types.DashboardMarketplaceInstall{
+		Name:        entry.Name,
+		Description: entry.Description,
+		Transport:   transport,
+		SessionMode: string(types.SessionModeStateless),
+	}
+	switch strings.ToLower(pkg.RegistryType) {
+	case "npm":
+		entry.Install.Command = "npx"
+		entry.Install.Args = []string{"-y", registryPackageIdentifierWithVersion(pkg)}
+	case "pypi":
+		entry.Install.Command = "uvx"
+		entry.Install.Args = []string{registryPackageIdentifierWithVersion(pkg)}
+	default:
+		entry.Install = nil
+		entry.InstallStatus = types.DashboardMarketplaceExternal
+		entry.ReviewReasons = []string{"Unsupported package registry; register manually after reviewing upstream documentation."}
+	}
+}
+
+func registryRemoteTransport(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "streamable-http", "streamable_http":
+		return string(types.TransportStreamableHTTP)
+	case "sse":
+		return string(types.TransportSSE)
+	default:
+		return ""
+	}
+}
+
+func registryPackageTransport(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stdio":
+		return string(types.TransportStdio)
+	default:
+		return ""
+	}
+}
+
+func registryRequiredHeaderKeys(headers []officialRegistryHeader) []string {
+	keys := []string{}
+	seen := map[string]bool{}
+	for _, header := range headers {
+		name := strings.TrimSpace(header.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		if header.IsRequired || header.IsSecret {
+			keys = append(keys, name)
+			seen[name] = true
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func emptyValueMap(keys []string) map[string]string {
+	if len(keys) == 0 {
+		return nil
+	}
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = ""
+	}
+	return values
+}
+
+func isHTTPSURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil
+}
+
+func officialRegistryDigest(manifest officialRegistryServer) string {
+	body, err := json.Marshal(manifest)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func marketplaceDisplayTitle(manifest officialRegistryServer) string {
+	if strings.TrimSpace(manifest.Title) != "" {
+		return strings.TrimSpace(manifest.Title)
+	}
+	name := strings.TrimSpace(manifest.Name)
+	if index := strings.LastIndex(name, "/"); index >= 0 && index < len(name)-1 {
+		return name[index+1:]
+	}
+	return name
+}
+
+func marketplacePublisher(manifest officialRegistryServer) string {
+	if manifest.Repository.Source != "" {
+		return strings.TrimSpace(manifest.Repository.Source)
+	}
+	name := strings.TrimSpace(manifest.Name)
+	if index := strings.Index(name, "/"); index > 0 {
+		return name[:index]
+	}
+	return ""
+}
+
+func marketplaceInstallName(name string) string {
+	var builder strings.Builder
+	lastDash := false
+	for _, value := range strings.ToLower(strings.TrimSpace(name)) {
+		if unicode.IsLetter(value) || unicode.IsDigit(value) || value == '_' {
+			builder.WriteRune(value)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	output := strings.Trim(builder.String(), "-")
+	if output == "" {
+		return "marketplace-server"
+	}
+	return output
+}
+
+func registryPackageIdentifierWithVersion(pkg officialRegistryPackage) string {
+	identifier := strings.TrimSpace(pkg.Identifier)
+	version := strings.TrimSpace(pkg.Version)
+	if version == "" {
+		return identifier
+	}
+	switch strings.ToLower(pkg.RegistryType) {
+	case "pypi":
+		return identifier + "==" + version
+	default:
+		return identifier + "@" + version
+	}
+}
+
+func registryPackageURL(pkg officialRegistryPackage) string {
+	switch strings.ToLower(pkg.RegistryType) {
+	case "npm":
+		return "https://www.npmjs.com/package/" + url.PathEscape(pkg.Identifier)
+	case "pypi":
+		return "https://pypi.org/project/" + url.PathEscape(pkg.Identifier) + "/"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (s *Service) ValidateMarketplaceRegistration(ctx context.Context, sourceID, entryID string, input *types.RegisterServerInput) error {
 	if entryID == "" {
 		return nil
 	}
-	entry, ok := marketplaceServerByID(entryID)
+	entry, ok, err := s.marketplaceEntry(ctx, sourceID, entryID)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("marketplace entry %q was not found: %w", entryID, apierrors.ErrInvalidInput)
 	}
@@ -181,14 +894,33 @@ func (s *Service) ValidateMarketplaceRegistration(entryID string, input *types.R
 	if input.Transport != entry.Install.Transport {
 		return fmt.Errorf("marketplace entry %q must use %s transport: %w", entryID, entry.Install.Transport, apierrors.ErrInvalidInput)
 	}
+	switch entry.Install.Transport {
+	case string(types.TransportStreamableHTTP), string(types.TransportSSE):
+		if input.URL != entry.Install.URL {
+			return fmt.Errorf("marketplace entry %q must use catalog URL %q: %w", entryID, entry.Install.URL, apierrors.ErrInvalidInput)
+		}
+		if !mapKeysContain(input.Headers, entry.Install.Headers) {
+			return fmt.Errorf("marketplace entry %q is missing required header keys: %w", entryID, apierrors.ErrInvalidInput)
+		}
+	case string(types.TransportStdio):
+		if input.Command != entry.Install.Command || !reflect.DeepEqual(input.Args, entry.Install.Args) {
+			return fmt.Errorf("marketplace entry %q must use the catalog command draft: %w", entryID, apierrors.ErrInvalidInput)
+		}
+		if !mapKeysContain(input.Env, entry.Install.Env) {
+			return fmt.Errorf("marketplace entry %q is missing required env keys: %w", entryID, apierrors.ErrInvalidInput)
+		}
+	}
 	return nil
 }
 
-func (s *Service) RecordMarketplaceInstallation(serverName, entryID string) error {
+func (s *Service) RecordMarketplaceInstallation(ctx context.Context, serverName, sourceID, entryID string) error {
 	if entryID == "" || s == nil || s.db == nil {
 		return nil
 	}
-	entry, ok := marketplaceServerByID(entryID)
+	entry, ok, err := s.marketplaceEntry(ctx, sourceID, entryID)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("marketplace entry %q was not found: %w", entryID, apierrors.ErrInvalidInput)
 	}
@@ -231,13 +963,29 @@ func (s *Service) RecordMarketplaceInstallation(serverName, entryID string) erro
 	}).Create(&record).Error
 }
 
-func marketplaceServerByID(entryID string) (types.DashboardMarketplaceServer, bool) {
-	for _, entry := range marketplaceServers() {
-		if entry.ID == entryID {
-			return entry, true
-		}
+func (s *Service) marketplaceEntry(ctx context.Context, sourceID, entryID string) (types.DashboardMarketplaceServer, bool, error) {
+	resp, err := s.MarketplaceWithQuery(ctx, MarketplaceQuery{LoadSources: true, Limit: maxMarketplaceLimit})
+	if err != nil {
+		return types.DashboardMarketplaceServer{}, false, err
 	}
-	return types.DashboardMarketplaceServer{}, false
+	var match *types.DashboardMarketplaceServer
+	for index := range resp.Servers {
+		entry := resp.Servers[index]
+		if entry.ID != entryID {
+			continue
+		}
+		if sourceID != "" && entry.SourceID != sourceID {
+			continue
+		}
+		if match != nil {
+			return types.DashboardMarketplaceServer{}, false, fmt.Errorf("marketplace entry %q exists in multiple sources; provide marketplace_source_id: %w", entryID, apierrors.ErrInvalidInput)
+		}
+		match = &entry
+	}
+	if match == nil {
+		return types.DashboardMarketplaceServer{}, false, nil
+	}
+	return *match, true, nil
 }
 
 func marketplaceSourceURL(sourceID string) string {
@@ -458,13 +1206,29 @@ func marketplaceServers() []types.DashboardMarketplaceServer {
 		},
 	}
 
+	sortMarketplaceServers(servers)
+	return servers
+}
+
+func sortMarketplaceServers(servers []types.DashboardMarketplaceServer) {
 	sort.SliceStable(servers, func(i, j int) bool {
 		if servers[i].InstallStatus != servers[j].InstallStatus {
 			return installStatusRank(servers[i].InstallStatus) < installStatusRank(servers[j].InstallStatus)
 		}
-		return servers[i].DisplayName < servers[j].DisplayName
+		leftName := marketplaceSortName(servers[i])
+		rightName := marketplaceSortName(servers[j])
+		if leftName == rightName {
+			return marketplaceEntryKey(servers[i].SourceID, servers[i].ID) < marketplaceEntryKey(servers[j].SourceID, servers[j].ID)
+		}
+		return leftName < rightName
 	})
-	return servers
+}
+
+func marketplaceSortName(entry types.DashboardMarketplaceServer) string {
+	if entry.DisplayName != "" {
+		return entry.DisplayName
+	}
+	return entry.Name
 }
 
 func installStatusRank(status types.DashboardMarketplaceInstallStatus) int {

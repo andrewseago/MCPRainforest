@@ -173,6 +173,11 @@ export interface DashboardMarketplaceSource {
   url: string;
   description?: string;
   trust_level?: string;
+  status?: string;
+  server_count?: number;
+  loaded_at?: string;
+  error?: string;
+  searchable?: boolean;
 }
 
 export interface DashboardMarketplaceInstall {
@@ -228,6 +233,20 @@ export interface DashboardMarketplaceServer {
 export interface DashboardMarketplaceResponse {
   sources: DashboardMarketplaceSource[];
   servers: DashboardMarketplaceServer[];
+  query?: {
+    q?: string;
+    source_id?: string;
+    transport?: string;
+    install_status?: string;
+    update_state?: string;
+    limit?: number;
+    cursor?: string;
+  };
+  pagination?: {
+    limit?: number;
+    next_cursor?: string;
+    total?: number;
+  };
   empty_state?: DashboardEmptyState;
 }
 
@@ -242,6 +261,7 @@ export interface DashboardRegisterServerInput {
   args?: string[];
   env?: Record<string, string>;
   session_mode?: "stateless" | "stateful";
+  marketplace_source_id?: string;
   marketplace_entry_id?: string;
 }
 
