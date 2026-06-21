@@ -768,6 +768,7 @@ export default function App() {
   const [toolFilter, setToolFilter] = useState("");
   const [toolServerFilter, setToolServerFilter] = useState("all");
   const [promptFilter, setPromptFilter] = useState("");
+  const [resourceFilter, setResourceFilter] = useState("");
   const [toolGroupToolFilter, setToolGroupToolFilter] = useState("");
   const [toolGroupToolServerFilter, setToolGroupToolServerFilter] = useState("all");
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
@@ -1052,6 +1053,22 @@ export default function App() {
     );
   }, [data.prompts?.prompts, promptFilter]);
 
+  const filteredResources = useMemo(() => {
+    const resources = data.resources?.resources ?? [];
+    if (!resourceFilter.trim()) {
+      return resources;
+    }
+    const term = resourceFilter.toLowerCase();
+    return resources.filter(
+      (resource) =>
+        resource.name.toLowerCase().includes(term) ||
+        resource.uri.toLowerCase().includes(term) ||
+        resource.server.toLowerCase().includes(term) ||
+        resourceDescription(resource).toLowerCase().includes(term) ||
+        (resource.mime_type ?? "").toLowerCase().includes(term),
+    );
+  }, [data.resources?.resources, resourceFilter]);
+
   const hasMarketplaceFilter =
     marketplaceFilter.trim().length > 0 ||
     marketplaceSourceFilter !== "all" ||
@@ -1061,6 +1078,7 @@ export default function App() {
   const hasServerFilter = serverFilter.trim().length > 0;
   const hasToolFilter = toolFilter.trim().length > 0 || toolServerFilter !== "all";
   const hasPromptFilter = promptFilter.trim().length > 0;
+  const hasResourceFilter = resourceFilter.trim().length > 0;
   const hasToolGroupToolFilter = toolGroupToolFilter.trim().length > 0 || toolGroupToolServerFilter !== "all";
 
   const overview = data.overview;
@@ -2988,45 +3006,84 @@ export default function App() {
             ) : null}
 
             {section === "resources" && data.resources ? (
-              <SectionCard title="Resources" subtitle="Discovered MCP resources">
-                {data.resources.empty_state && data.resources.resources.length === 0 ? (
+              <SectionCard
+                title="Resources"
+                subtitle="Discovered MCP resources"
+                action={
+                  <div className="toolbar-cluster">
+                    <input
+                      className="table-filter compact-filter"
+                      onChange={(event) => setResourceFilter(event.target.value)}
+                      placeholder="Search resources"
+                      value={resourceFilter}
+                    />
+                  </div>
+                }
+              >
+                {filteredResources.length === 0 && hasResourceFilter ? (
+                  <FilterEmptyState
+                    actionLabel="Clear search"
+                    description="Clear the current search to show all discovered resources."
+                    onClear={() => setResourceFilter("")}
+                    title="No resources match"
+                  />
+                ) : data.resources.empty_state && data.resources.resources.length === 0 ? (
                   <EmptyStateCard emptyState={data.resources.empty_state} />
                 ) : (
-                  <table className="data-table compact-table resources-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>URI</th>
-                        <th>Server</th>
-                        <th>MIME</th>
-                        <th>Description</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.resources.resources.map((resource) => (
-                        <tr key={resource.uri}>
-                          <td>{resource.name}</td>
-                          <td>
-                            <div className="inline-copy resource-uri-cell">
-                              <code className="identifier-code" title={resource.uri}>
-                                {resource.uri}
-                              </code>
-                              <CopyButton
-                                ariaLabel="Copy resource URI"
-                                title="Copy resource URI"
-                                value={resource.uri}
-                              />
-                            </div>
-                          </td>
-                          <td>{resource.server}</td>
-                          <td>
-                            <code>{resource.mime_type || "Unknown"}</code>
-                          </td>
-                          <td>{resourceDescription(resource)}</td>
+                  <div className="tools-table-wrap">
+                    <table className="data-table compact-table resources-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>URI</th>
+                          <th>Server</th>
+                          <th>MIME</th>
+                          <th>Status</th>
+                          <th>Description</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {filteredResources.map((resource) => (
+                          <tr key={resource.uri}>
+                            <td>
+                              <div className="table-primary">{resource.name}</div>
+                            </td>
+                            <td>
+                              <div className="inline-copy resource-uri-cell">
+                                <code className="identifier-code" title={resource.uri}>
+                                  {resource.uri}
+                                </code>
+                                <CopyButton
+                                  ariaLabel="Copy resource URI"
+                                  title="Copy resource URI"
+                                  value={resource.uri}
+                                />
+                              </div>
+                            </td>
+                            <td>{resource.server}</td>
+                            <td>
+                              <code>{resource.mime_type || "Unknown"}</code>
+                            </td>
+                            <td>
+                              <div className="tool-state-line">
+                                <StatusBadge
+                                  text={resource.enabled ? "Enabled" : "Disabled"}
+                                  tone={resource.enabled ? "good" : "muted"}
+                                />
+                                {resource.server_status ? (
+                                  <StatusBadge
+                                    text={serverStatusLabel(resource.server_status)}
+                                    tone={healthTone(resource.server_status)}
+                                  />
+                                ) : null}
+                              </div>
+                            </td>
+                            <td>{resourceDescription(resource)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </SectionCard>
             ) : null}
