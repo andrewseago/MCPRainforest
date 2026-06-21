@@ -2,6 +2,7 @@ import type { AppSection } from "@/lib/types";
 
 const items: Array<{ key: AppSection; label: string }> = [
   { key: "servers", label: "Servers" },
+  { key: "marketplace", label: "Marketplace" },
   { key: "tools", label: "Tools" },
   { key: "tool_groups", label: "Tool Groups" },
   { key: "prompts", label: "Prompts" },
@@ -23,6 +24,13 @@ function SectionIcon({ section }: { section: AppSection }) {
         <svg aria-hidden="true" className="nav-icon" fill="none" viewBox="0 0 16 16">
           <path d="m9.75 2.75 3.5 3.5-7 7H2.75v-3.5z" stroke="currentColor" strokeLinejoin="round" />
           <path d="m8.5 4 3.5 3.5" stroke="currentColor" strokeLinecap="round" />
+        </svg>
+      );
+    case "marketplace":
+      return (
+        <svg aria-hidden="true" className="nav-icon" fill="none" viewBox="0 0 16 16">
+          <path d="M3.25 5.25h9.5v7.5h-9.5z" stroke="currentColor" strokeLinejoin="round" />
+          <path d="M5.25 5.25a2.75 2.75 0 0 1 5.5 0M5.25 8h5.5M5.25 10.25h3" stroke="currentColor" strokeLinecap="round" />
         </svg>
       );
     case "tool_groups":

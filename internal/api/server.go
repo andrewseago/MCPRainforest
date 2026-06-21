@@ -377,6 +377,7 @@ func (s *Server) setupRouter() (*gin.Engine, error) {
 			dashboardAPI.PATCH("/prompts/:name/enabled", s.dashboardSetPromptEnabledHandler())
 			dashboardAPI.GET("/resources", s.dashboardResourcesHandler())
 			dashboardAPI.GET("/diagnostics", s.dashboardDiagnosticsHandler())
+			dashboardAPI.GET("/marketplace", s.dashboardMarketplaceHandler())
 		}
 	}
 

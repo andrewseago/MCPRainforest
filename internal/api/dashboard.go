@@ -75,6 +75,17 @@ func (s *Server) dashboardDiagnosticsHandler() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) dashboardMarketplaceHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		resp, err := s.dashboardService.Marketplace()
+		if err != nil {
+			handleServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
 func requestBaseURL(c *gin.Context) string {
 	scheme := "http"
 	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {

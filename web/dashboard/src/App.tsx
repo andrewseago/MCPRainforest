@@ -5,6 +5,8 @@ import type {
   AppSection,
   DashboardCreateToolGroupInput,
   DashboardData,
+  DashboardMarketplaceResponse,
+  DashboardMarketplaceServer,
   DashboardOAuthAuthorizationRequired,
   DashboardPrompt,
   DashboardRegisterServerInput,
@@ -103,6 +105,10 @@ const sectionMeta: Record<AppSection, { title: string; subtitle: string }> = {
     title: "Servers",
     subtitle: "Registered upstream MCP servers and connection state.",
   },
+  marketplace: {
+    title: "Marketplace",
+    subtitle: "Discover MCP servers and create reviewed registration drafts.",
+  },
   tools: {
     title: "Tools",
     subtitle: "Search, inspect, copy, enable, and disable discovered tools.",
@@ -138,6 +144,27 @@ function shortVersion(version?: string) {
 
 function transportLabel(value?: string) {
   return value ? value.split("_").join(" ") : "unknown";
+}
+
+function marketplaceStatusLabel(value?: string) {
+  return value ? value.split("_").join(" ") : "unknown";
+}
+
+function marketplaceStatusTone(value?: string) {
+  if (value === "installable") {
+    return "good" as const;
+  }
+  if (value === "blocked") {
+    return "bad" as const;
+  }
+  if (value === "review_required" || value === "external") {
+    return "warn" as const;
+  }
+  return "muted" as const;
+}
+
+function marketplaceDisplayName(server: DashboardMarketplaceServer) {
+  return server.display_name || server.name;
 }
 
 function toolDescription(tool: DashboardTool) {
@@ -382,6 +409,36 @@ function createInitialRegisterForm(): RegisterServerFormState {
   };
 }
 
+function keyedRows(values?: Record<string, string>, requiredKeys?: string[]) {
+  const rows = Object.entries(values ?? {}).map(([key, value]) => ({ key, value }));
+  (requiredKeys ?? []).forEach((key) => {
+    if (!rows.some((row) => row.key === key)) {
+      rows.push({ key, value: "" });
+    }
+  });
+  return rows.length > 0 ? rows : [createEmptyPair()];
+}
+
+function marketplaceDraftToRegisterForm(entry: DashboardMarketplaceServer): RegisterServerFormState {
+  const draft = entry.install;
+  const initial = createInitialRegisterForm();
+  if (!draft) {
+    return initial;
+  }
+  return {
+    ...initial,
+    name: draft.name || entry.name,
+    description: draft.description || entry.description,
+    transport: draft.transport,
+    session_mode: draft.session_mode ?? "stateless",
+    command: draft.command ?? "",
+    args_text: (draft.args ?? []).join("\n"),
+    env_rows: keyedRows(draft.env, draft.required_env_keys),
+    url: draft.url ?? "",
+    header_rows: keyedRows(draft.headers, draft.required_header_keys),
+  };
+}
+
 function rowsToMap(rows: KeyValueRow[]) {
   const output: Record<string, string> = {};
   rows.forEach((row) => {
@@ -462,6 +519,7 @@ const legacyDashboardSectionKey = "mcpjungle-dashboard-section";
 function isAppSection(value: string | null): value is AppSection {
   return (
     value === "servers" ||
+    value === "marketplace" ||
     value === "tools" ||
     value === "tool_groups" ||
     value === "prompts" ||
@@ -610,6 +668,13 @@ export default function App() {
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialThemeMode);
+  const [marketplaceLoadState, setMarketplaceLoadState] = useState<LoadState>("idle");
+  const [marketplaceError, setMarketplaceError] = useState("");
+  const [marketplaceData, setMarketplaceData] = useState<DashboardMarketplaceResponse | null>(null);
+  const [marketplaceFilter, setMarketplaceFilter] = useState("");
+  const [marketplaceSourceFilter, setMarketplaceSourceFilter] = useState("all");
+  const [marketplaceTransportFilter, setMarketplaceTransportFilter] = useState("all");
+  const [marketplaceStatusFilter, setMarketplaceStatusFilter] = useState("all");
   const [serverFilter, setServerFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
   const [toolServerFilter, setToolServerFilter] = useState("all");
@@ -617,12 +682,14 @@ export default function App() {
   const [toolGroupToolFilter, setToolGroupToolFilter] = useState("");
   const [toolGroupToolServerFilter, setToolGroupToolServerFilter] = useState("all");
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
+  const [expandedMarketplaceEntry, setExpandedMarketplaceEntry] = useState<string | null>(null);
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [expandedToolGroup, setExpandedToolGroup] = useState<string | null>(null);
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerForm, setRegisterForm] = useState<RegisterServerFormState>(createInitialRegisterForm());
   const [registerError, setRegisterError] = useState("");
+  const [registerDraftNotice, setRegisterDraftNotice] = useState("");
   const [registerOAuth, setRegisterOAuth] = useState<RegisterOAuthState | null>(null);
   const [toolGroupOpen, setToolGroupOpen] = useState(false);
   const [toolGroupForm, setToolGroupForm] = useState<ToolGroupFormState>(createInitialToolGroupForm());
@@ -685,8 +752,32 @@ export default function App() {
     }
   }
 
+  async function loadMarketplaceData(silent = false) {
+    if (!silent) {
+      setMarketplaceLoadState("loading");
+    }
+    setMarketplaceError("");
+    try {
+      const marketplace = await api.marketplace();
+      setMarketplaceData(marketplace);
+      setData((current) => ({ ...current, marketplace }));
+      setExpandedMarketplaceEntry((current) =>
+        current && marketplace.servers.some((server) => server.id === current) ? current : null,
+      );
+      setMarketplaceLoadState("ready");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setMarketplaceError(message);
+      setMarketplaceLoadState("error");
+      if (silent) {
+        setFeedback({ tone: "error", message: `Marketplace refresh failed: ${message}` });
+      }
+    }
+  }
+
   useEffect(() => {
     void loadDashboardData();
+    void loadMarketplaceData();
   }, []);
 
   useEffect(() => {
@@ -732,6 +823,62 @@ export default function App() {
         server.connection_summary.toLowerCase().includes(term),
     );
   }, [data.servers?.servers, serverFilter]);
+
+  const marketplaceSourceByID = useMemo(() => {
+    const sources = marketplaceData?.sources ?? [];
+    return new Map(sources.map((source) => [source.id, source]));
+  }, [marketplaceData?.sources]);
+
+  const marketplaceSources = useMemo(
+    () => [...(marketplaceData?.sources ?? [])].sort((left, right) => left.name.localeCompare(right.name)),
+    [marketplaceData?.sources],
+  );
+
+  const marketplaceTransports = useMemo(() => {
+    const transports = new Set((marketplaceData?.servers ?? []).map((server) => server.transport));
+    return Array.from(transports).sort();
+  }, [marketplaceData?.servers]);
+
+  const marketplaceStatuses = useMemo(() => {
+    const statuses = new Set((marketplaceData?.servers ?? []).map((server) => server.install_status));
+    return Array.from(statuses).sort();
+  }, [marketplaceData?.servers]);
+
+  const filteredMarketplaceServers = useMemo(() => {
+    let servers = marketplaceData?.servers ?? [];
+    if (marketplaceSourceFilter !== "all") {
+      servers = servers.filter((server) => server.source_id === marketplaceSourceFilter);
+    }
+    if (marketplaceTransportFilter !== "all") {
+      servers = servers.filter((server) => server.transport === marketplaceTransportFilter);
+    }
+    if (marketplaceStatusFilter !== "all") {
+      servers = servers.filter((server) => server.install_status === marketplaceStatusFilter);
+    }
+    if (!marketplaceFilter.trim()) {
+      return servers;
+    }
+    const term = marketplaceFilter.toLowerCase();
+    return servers.filter((server) => {
+      const source = marketplaceSourceByID.get(server.source_id);
+      return (
+        marketplaceDisplayName(server).toLowerCase().includes(term) ||
+        server.name.toLowerCase().includes(term) ||
+        server.description.toLowerCase().includes(term) ||
+        server.publisher?.toLowerCase().includes(term) ||
+        server.category?.toLowerCase().includes(term) ||
+        server.tags?.some((tag) => tag.toLowerCase().includes(term)) ||
+        source?.name.toLowerCase().includes(term)
+      );
+    });
+  }, [
+    marketplaceData?.servers,
+    marketplaceFilter,
+    marketplaceSourceByID,
+    marketplaceSourceFilter,
+    marketplaceStatusFilter,
+    marketplaceTransportFilter,
+  ]);
 
   const filteredTools = useMemo(() => {
     let tools = data.tools?.tools ?? [];
@@ -789,6 +936,11 @@ export default function App() {
     );
   }, [data.prompts?.prompts, promptFilter]);
 
+  const hasMarketplaceFilter =
+    marketplaceFilter.trim().length > 0 ||
+    marketplaceSourceFilter !== "all" ||
+    marketplaceTransportFilter !== "all" ||
+    marketplaceStatusFilter !== "all";
   const hasServerFilter = serverFilter.trim().length > 0;
   const hasToolFilter = toolFilter.trim().length > 0 || toolServerFilter !== "all";
   const hasPromptFilter = promptFilter.trim().length > 0;
@@ -839,6 +991,7 @@ export default function App() {
   const navCounts = useMemo<Partial<Record<AppSection, number>>>(
     () => ({
       servers: overview?.server_count,
+      marketplace: marketplaceData?.servers.length,
       tools: overview?.tool_count,
       tool_groups: data.toolGroups?.tool_groups.length,
       prompts: overview?.prompt_count,
@@ -846,6 +999,7 @@ export default function App() {
     }),
     [
       data.toolGroups?.tool_groups.length,
+      marketplaceData?.servers.length,
       overview?.prompt_count,
       overview?.resource_count,
       overview?.server_count,
@@ -917,6 +1071,22 @@ export default function App() {
   function openRegisterModal() {
     setRegisterForm(createInitialRegisterForm());
     setRegisterError("");
+    setRegisterDraftNotice("");
+    setRegisterOAuth(null);
+    setRegisterOpen(true);
+  }
+
+  function openMarketplaceRegistrationDraft(entry: DashboardMarketplaceServer) {
+    if (!entry.install || entry.install_status === "blocked" || entry.install_status === "external") {
+      return;
+    }
+    setRegisterForm(marketplaceDraftToRegisterForm(entry));
+    setRegisterError("");
+    setRegisterDraftNotice(
+      entry.install_status === "review_required"
+        ? `${marketplaceDisplayName(entry)} requires review before registration. Check the command, args, and security notes before submitting.`
+        : `${marketplaceDisplayName(entry)} is a marketplace draft. Review the target and submit when ready.`,
+    );
     setRegisterOAuth(null);
     setRegisterOpen(true);
   }
@@ -924,6 +1094,7 @@ export default function App() {
   function closeRegisterModal() {
     setRegisterOpen(false);
     setRegisterError("");
+    setRegisterDraftNotice("");
     setRegisterOAuth(null);
     setRegisterForm(createInitialRegisterForm());
   }
@@ -1186,6 +1357,48 @@ export default function App() {
     }
   }
 
+  function renderMarketplaceAction(entry: DashboardMarketplaceServer) {
+    if (entry.installed) {
+      return (
+        <button className="secondary-action" disabled type="button">
+          Installed
+        </button>
+      );
+    }
+    if (entry.install && (entry.install_status === "installable" || entry.install_status === "review_required")) {
+      return (
+        <button
+          className={entry.install_status === "installable" ? "primary-action" : "secondary-action"}
+          onClick={(event) => {
+            event.stopPropagation();
+            openMarketplaceRegistrationDraft(entry);
+          }}
+          type="button"
+        >
+          {entry.install_status === "installable" ? "Review & Add" : "Review Draft"}
+        </button>
+      );
+    }
+    if (entry.install_status === "external" && (entry.homepage_url || entry.package_url)) {
+      return (
+        <a
+          className="secondary-action marketplace-action-link"
+          href={entry.homepage_url || entry.package_url}
+          onClick={(event) => event.stopPropagation()}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Open Source
+        </a>
+      );
+    }
+    return (
+      <button className="secondary-action" disabled type="button">
+        Blocked
+      </button>
+    );
+  }
+
   return (
     <div className="app-shell">
       <NavSidebar active={section} counts={navCounts} logoUrl={logoUrl} onSelect={setSection} />
@@ -1209,7 +1422,10 @@ export default function App() {
               aria-label="Refresh dashboard data"
               className="secondary-action refresh-action"
               disabled={refreshing || loadState === "loading"}
-              onClick={() => void loadDashboardData(loadState !== "error")}
+              onClick={() => {
+                void loadDashboardData(loadState !== "error");
+                void loadMarketplaceData(true);
+              }}
               type="button"
             >
               <RefreshIcon />
@@ -1535,6 +1751,317 @@ export default function App() {
                   </aside>
                 </div>
               </>
+            ) : null}
+
+            {section === "marketplace" ? (
+              <SectionCard
+                title="MCP server marketplace"
+                subtitle="Catalog entries are reviewed registration drafts. Submitting a draft uses the normal Add Server flow."
+                action={
+                  <div className="toolbar-cluster marketplace-toolbar">
+                    <input
+                      className="table-filter compact-filter"
+                      onChange={(event) => setMarketplaceFilter(event.target.value)}
+                      placeholder="Search marketplace"
+                      value={marketplaceFilter}
+                    />
+                    <select
+                      className="table-filter compact-filter compact-select"
+                      onChange={(event) => setMarketplaceSourceFilter(event.target.value)}
+                      value={marketplaceSourceFilter}
+                    >
+                      <option value="all">All sources</option>
+                      {marketplaceSources.map((source) => (
+                        <option key={source.id} value={source.id}>
+                          {source.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="table-filter compact-filter compact-select"
+                      onChange={(event) => setMarketplaceStatusFilter(event.target.value)}
+                      value={marketplaceStatusFilter}
+                    >
+                      <option value="all">All states</option>
+                      {marketplaceStatuses.map((status) => (
+                        <option key={status} value={status}>
+                          {marketplaceStatusLabel(status)}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="table-filter compact-filter compact-select"
+                      onChange={(event) => setMarketplaceTransportFilter(event.target.value)}
+                      value={marketplaceTransportFilter}
+                    >
+                      <option value="all">All transports</option>
+                      {marketplaceTransports.map((transport) => (
+                        <option key={transport} value={transport}>
+                          {transportLabel(transport)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                }
+              >
+                {marketplaceLoadState === "loading" || marketplaceLoadState === "idle" ? (
+                  <div className="filter-empty-state">
+                    <strong>Loading marketplace</strong>
+                    <p>Reading local MCP marketplace catalog data.</p>
+                  </div>
+                ) : marketplaceLoadState === "error" ? (
+                  <div className="filter-empty-state">
+                    <strong>Marketplace unavailable</strong>
+                    <p>{marketplaceError || "The marketplace catalog could not be loaded."}</p>
+                    <button className="secondary-action" onClick={() => void loadMarketplaceData()} type="button">
+                      Retry
+                    </button>
+                  </div>
+                ) : marketplaceData?.empty_state ? (
+                  <EmptyStateCard emptyState={marketplaceData.empty_state} />
+                ) : filteredMarketplaceServers.length === 0 && hasMarketplaceFilter ? (
+                  <FilterEmptyState
+                    actionLabel="Clear filters"
+                    description="Clear search, source, state, and transport filters to show all catalog entries."
+                    onClear={() => {
+                      setMarketplaceFilter("");
+                      setMarketplaceSourceFilter("all");
+                      setMarketplaceStatusFilter("all");
+                      setMarketplaceTransportFilter("all");
+                    }}
+                    title="No marketplace entries match"
+                  />
+                ) : filteredMarketplaceServers.length === 0 ? (
+                  <BasicEmptyState
+                    description="No MCP servers are currently available in the local marketplace catalog."
+                    title="No marketplace entries"
+                  />
+                ) : (
+                  <div className="tools-table-wrap">
+                    <table className="data-table compact-table marketplace-table">
+                      <thead>
+                        <tr>
+                          <th aria-hidden="true" className="expand-column"></th>
+                          <th>Server</th>
+                          <th>Source</th>
+                          <th>Category</th>
+                          <th>Transport</th>
+                          <th>State</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredMarketplaceServers.map((entry) => {
+                          const expanded = expandedMarketplaceEntry === entry.id;
+                          const source = marketplaceSourceByID.get(entry.source_id);
+                          const installCommand =
+                            entry.install?.command && entry.install.args?.length
+                              ? [entry.install.command, ...entry.install.args].join(" ")
+                              : entry.install?.command;
+                          return (
+                            <Fragment key={entry.id}>
+                              <tr
+                                aria-expanded={expanded}
+                                className={`${expanded ? "is-selected" : ""} ${entry.install_status === "blocked" ? "is-muted" : ""} tool-summary-row`}
+                                onClick={() => setExpandedMarketplaceEntry(expanded ? null : entry.id)}
+                              >
+                                <td className="expand-column">
+                                  <ChevronIcon expanded={expanded} />
+                                </td>
+                                <td>
+                                  <div className="table-primary">{marketplaceDisplayName(entry)}</div>
+                                  <div className="table-secondary">{entry.publisher || "Unknown publisher"}</div>
+                                </td>
+                                <td>{source?.name ?? entry.source_id}</td>
+                                <td>
+                                  <div className="marketplace-category-cell">
+                                    <span>{entry.category || "Uncategorized"}</span>
+                                    {entry.installed ? (
+                                      <StatusBadge text="Installed" tone="good" />
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td>{transportLabel(entry.transport)}</td>
+                                <td>
+                                  <StatusBadge
+                                    text={marketplaceStatusLabel(entry.install_status)}
+                                    tone={marketplaceStatusTone(entry.install_status)}
+                                  />
+                                </td>
+                                <td>
+                                  <div className="row-actions" onClick={(event) => event.stopPropagation()}>
+                                    {renderMarketplaceAction(entry)}
+                                  </div>
+                                </td>
+                              </tr>
+                              {expanded ? (
+                                <tr className="tool-expanded-row">
+                                  <td className="tool-expanded-cell" colSpan={7}>
+                                    <div className="tool-detail-panel marketplace-detail-panel">
+                                      <div className="tool-detail-header">
+                                        <div>
+                                          <p className="panel-label">Marketplace entry</p>
+                                          <h3>{marketplaceDisplayName(entry)}</h3>
+                                        </div>
+                                        <div className="row-actions">
+                                          {renderMarketplaceAction(entry)}
+                                        </div>
+                                      </div>
+
+                                      <dl className="tool-detail-meta">
+                                        <div className="tool-detail-description">
+                                          <dt>Description</dt>
+                                          <dd>{entry.description}</dd>
+                                        </div>
+                                        <div>
+                                          <dt>Source</dt>
+                                          <dd>{source?.name ?? entry.source_id}</dd>
+                                        </div>
+                                        <div>
+                                          <dt>Publisher</dt>
+                                          <dd>{entry.publisher || "Unknown"}</dd>
+                                        </div>
+                                        <div>
+                                          <dt>Version</dt>
+                                          <dd>
+                                            <code>{entry.version || "Unknown"}</code>
+                                          </dd>
+                                        </div>
+                                        <div>
+                                          <dt>Digest</dt>
+                                          <dd>
+                                            <code>{entry.digest || "Unavailable"}</code>
+                                          </dd>
+                                        </div>
+                                        <div>
+                                          <dt>Auth</dt>
+                                          <dd>{entry.auth_type || "Unknown"}</dd>
+                                        </div>
+                                      </dl>
+
+                                      <div className="marketplace-detail-grid">
+                                        <section className="marketplace-detail-section">
+                                          <h4>Install Draft</h4>
+                                          {entry.install ? (
+                                            <dl className="schema-field-meta">
+                                              <div>
+                                                <dt>Name</dt>
+                                                <dd>
+                                                  <code>{entry.install.name}</code>
+                                                </dd>
+                                              </div>
+                                              <div>
+                                                <dt>Transport</dt>
+                                                <dd>{transportLabel(entry.install.transport)}</dd>
+                                              </div>
+                                              {entry.install.url ? (
+                                                <div>
+                                                  <dt>URL</dt>
+                                                  <dd>
+                                                    <div className="detail-copy-row">
+                                                      <code className="detail-target-code">{entry.install.url}</code>
+                                                      <CopyButton ariaLabel="Copy marketplace URL" title="Copy URL" value={entry.install.url} />
+                                                    </div>
+                                                  </dd>
+                                                </div>
+                                              ) : null}
+                                              {installCommand ? (
+                                                <div>
+                                                  <dt>Command</dt>
+                                                  <dd>
+                                                    <div className="detail-copy-row">
+                                                      <code className="detail-target-code">{installCommand}</code>
+                                                      <CopyButton
+                                                        ariaLabel="Copy marketplace command"
+                                                        title="Copy command"
+                                                        value={installCommand}
+                                                      />
+                                                    </div>
+                                                  </dd>
+                                                </div>
+                                              ) : null}
+                                              <div>
+                                                <dt>Session mode</dt>
+                                                <dd>{entry.install.session_mode ?? "stateless"}</dd>
+                                              </div>
+                                              <div>
+                                                <dt>Env keys</dt>
+                                                <dd>
+                                                  <code>{entry.install.required_env_keys?.join(", ") || "None"}</code>
+                                                </dd>
+                                              </div>
+                                              <div>
+                                                <dt>Header keys</dt>
+                                                <dd>
+                                                  <code>{entry.install.required_header_keys?.join(", ") || "None"}</code>
+                                                </dd>
+                                              </div>
+                                            </dl>
+                                          ) : (
+                                            <p className="empty-inline">This entry cannot create a local registration draft.</p>
+                                          )}
+                                        </section>
+
+                                        <section className="marketplace-detail-section">
+                                          <h4>Policy</h4>
+                                          <div className="marketplace-note-list">
+                                            {(entry.review_reasons?.length ? entry.review_reasons : ["No extra review reasons reported."]).map(
+                                              (reason) => (
+                                                <p key={reason}>{reason}</p>
+                                              ),
+                                            )}
+                                          </div>
+                                        </section>
+
+                                        <section className="marketplace-detail-section">
+                                          <h4>Security Notes</h4>
+                                          <div className="marketplace-note-list">
+                                            {(entry.security_notes?.length ? entry.security_notes : ["No security notes reported."]).map(
+                                              (note) => (
+                                                <p key={note}>{note}</p>
+                                              ),
+                                            )}
+                                          </div>
+                                        </section>
+                                      </div>
+
+                                      <div className="marketplace-tag-row">
+                                        {(entry.tags ?? []).map((tag) => (
+                                          <span className="marketplace-tag" key={tag}>
+                                            {tag}
+                                          </span>
+                                        ))}
+                                      </div>
+
+                                      <div className="marketplace-link-row">
+                                        {source?.url ? (
+                                          <a href={source.url} rel="noopener noreferrer" target="_blank">
+                                            Source catalog
+                                          </a>
+                                        ) : null}
+                                        {entry.homepage_url ? (
+                                          <a href={entry.homepage_url} rel="noopener noreferrer" target="_blank">
+                                            Homepage
+                                          </a>
+                                        ) : null}
+                                        {entry.package_url ? (
+                                          <a href={entry.package_url} rel="noopener noreferrer" target="_blank">
+                                            Package
+                                          </a>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
             ) : null}
 
             {section === "tools" && data.tools ? (
@@ -2415,6 +2942,12 @@ export default function App() {
                 </div>
               ) : (
                 <>
+                  {registerDraftNotice ? (
+                    <section className="marketplace-draft-notice">
+                      <strong>Marketplace draft</strong>
+                      <span>{registerDraftNotice}</span>
+                    </section>
+                  ) : null}
                   <div className="modal-form">
                     <label className="form-field">
                       <span>Server name</span>

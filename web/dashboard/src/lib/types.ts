@@ -1,5 +1,6 @@
 export type AppSection =
   | "servers"
+  | "marketplace"
   | "tools"
   | "tool_groups"
   | "prompts"
@@ -153,6 +154,63 @@ export interface DashboardDiagnosticsResponse {
   empty_state?: DashboardEmptyState;
 }
 
+export type DashboardMarketplaceInstallStatus =
+  | "installable"
+  | "review_required"
+  | "external"
+  | "blocked";
+
+export interface DashboardMarketplaceSource {
+  id: string;
+  name: string;
+  url: string;
+  description?: string;
+  trust_level?: string;
+}
+
+export interface DashboardMarketplaceInstall {
+  name: string;
+  description?: string;
+  transport: "stdio" | "streamable_http" | "sse";
+  session_mode?: "stateless" | "stateful";
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  required_env_keys?: string[];
+  required_header_keys?: string[];
+}
+
+export interface DashboardMarketplaceServer {
+  id: string;
+  name: string;
+  display_name?: string;
+  description: string;
+  source_id: string;
+  publisher?: string;
+  version?: string;
+  digest?: string;
+  category?: string;
+  tags?: string[];
+  transport: string;
+  auth_type?: string;
+  homepage_url?: string;
+  package_url?: string;
+  install_status: DashboardMarketplaceInstallStatus;
+  install?: DashboardMarketplaceInstall;
+  installed: boolean;
+  installed_server_name?: string;
+  review_reasons?: string[];
+  security_notes?: string[];
+}
+
+export interface DashboardMarketplaceResponse {
+  sources: DashboardMarketplaceSource[];
+  servers: DashboardMarketplaceServer[];
+  empty_state?: DashboardEmptyState;
+}
+
 export interface DashboardRegisterServerInput {
   name: string;
   transport: "stdio" | "streamable_http" | "sse";
@@ -197,6 +255,7 @@ export interface DashboardOAuthSessionResponse {
 export interface DashboardData {
   overview?: DashboardOverviewResponse;
   servers?: DashboardServersResponse;
+  marketplace?: DashboardMarketplaceResponse;
   tools?: DashboardToolsResponse;
   toolGroups?: DashboardToolGroupsResponse;
   prompts?: DashboardPromptsResponse;

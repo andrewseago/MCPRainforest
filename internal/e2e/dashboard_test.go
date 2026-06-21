@@ -84,6 +84,7 @@ func TestDashboardAPIValidJSON(t *testing.T) {
 		"/api/dashboard/prompts",
 		"/api/dashboard/resources",
 		"/api/dashboard/diagnostics",
+		"/api/dashboard/marketplace",
 	}
 
 	for _, path := range paths {
@@ -94,6 +95,57 @@ func TestDashboardAPIValidJSON(t *testing.T) {
 		drain(resp)
 		require.NotNil(t, payload, path)
 	}
+}
+
+func TestDashboardMarketplaceAPI(t *testing.T) {
+	env := setupE2EServer(t, model.ModeDev)
+
+	serverModel, err := model.NewStreamableHTTPServer(
+		"context7",
+		"Current documentation lookup through Context7.",
+		"https://mcp.context7.com/mcp",
+		"",
+		nil,
+		"",
+	)
+	require.NoError(t, err)
+	require.NoError(t, env.db.Create(serverModel).Error)
+
+	resp := env.do(t, http.MethodGet, "/api/dashboard/marketplace", nil, "")
+	defer drain(resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var payload types.DashboardMarketplaceResponse
+	decodeJSON(t, resp, &payload)
+	require.NotEmpty(t, payload.Sources)
+	require.NotEmpty(t, payload.Servers)
+
+	var context7 *types.DashboardMarketplaceServer
+	var everything *types.DashboardMarketplaceServer
+	for index := range payload.Servers {
+		switch payload.Servers[index].ID {
+		case "context7":
+			context7 = &payload.Servers[index]
+		case "server-everything":
+			everything = &payload.Servers[index]
+		}
+	}
+
+	require.NotNil(t, context7)
+	require.Equal(t, "context7", context7.Name)
+	require.Equal(t, string(types.TransportStreamableHTTP), context7.Transport)
+	require.Equal(t, types.DashboardMarketplaceInstallable, context7.InstallStatus)
+	require.True(t, context7.Installed)
+	require.Equal(t, "context7", context7.InstalledServerName)
+	require.NotNil(t, context7.Install)
+	require.Equal(t, "https://mcp.context7.com/mcp", context7.Install.URL)
+
+	require.NotNil(t, everything)
+	require.Equal(t, string(types.TransportStdio), everything.Transport)
+	require.Equal(t, types.DashboardMarketplaceReviewRequired, everything.InstallStatus)
+	require.NotNil(t, everything.Install)
+	require.Equal(t, "npx", everything.Install.Command)
+	require.Contains(t, everything.Install.Args, "@modelcontextprotocol/server-everything")
 }
 
 func TestDashboardServerSummariesDoNotExposeSecrets(t *testing.T) {

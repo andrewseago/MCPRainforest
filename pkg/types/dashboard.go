@@ -142,3 +142,63 @@ type DashboardDiagnosticsResponse struct {
 	ResourceCount        int                  `json:"resource_count"`
 	EmptyState           *DashboardEmptyState `json:"empty_state,omitempty"`
 }
+
+type DashboardMarketplaceInstallStatus string
+
+const (
+	DashboardMarketplaceInstallable    DashboardMarketplaceInstallStatus = "installable"
+	DashboardMarketplaceReviewRequired DashboardMarketplaceInstallStatus = "review_required"
+	DashboardMarketplaceExternal       DashboardMarketplaceInstallStatus = "external"
+	DashboardMarketplaceBlocked        DashboardMarketplaceInstallStatus = "blocked"
+)
+
+type DashboardMarketplaceSource struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+	TrustLevel  string `json:"trust_level,omitempty"`
+}
+
+type DashboardMarketplaceInstall struct {
+	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
+	Transport          string            `json:"transport"`
+	SessionMode        string            `json:"session_mode,omitempty"`
+	URL                string            `json:"url,omitempty"`
+	Command            string            `json:"command,omitempty"`
+	Args               []string          `json:"args,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	RequiredEnvKeys    []string          `json:"required_env_keys,omitempty"`
+	RequiredHeaderKeys []string          `json:"required_header_keys,omitempty"`
+}
+
+type DashboardMarketplaceServer struct {
+	ID                  string                            `json:"id"`
+	Name                string                            `json:"name"`
+	DisplayName         string                            `json:"display_name,omitempty"`
+	Description         string                            `json:"description"`
+	SourceID            string                            `json:"source_id"`
+	Publisher           string                            `json:"publisher,omitempty"`
+	Version             string                            `json:"version,omitempty"`
+	Digest              string                            `json:"digest,omitempty"`
+	Category            string                            `json:"category,omitempty"`
+	Tags                []string                          `json:"tags,omitempty"`
+	Transport           string                            `json:"transport"`
+	AuthType            string                            `json:"auth_type,omitempty"`
+	HomepageURL         string                            `json:"homepage_url,omitempty"`
+	PackageURL          string                            `json:"package_url,omitempty"`
+	InstallStatus       DashboardMarketplaceInstallStatus `json:"install_status"`
+	Install             *DashboardMarketplaceInstall      `json:"install,omitempty"`
+	Installed           bool                              `json:"installed"`
+	InstalledServerName string                            `json:"installed_server_name,omitempty"`
+	ReviewReasons       []string                          `json:"review_reasons,omitempty"`
+	SecurityNotes       []string                          `json:"security_notes,omitempty"`
+}
+
+type DashboardMarketplaceResponse struct {
+	Sources    []DashboardMarketplaceSource `json:"sources"`
+	Servers    []DashboardMarketplaceServer `json:"servers"`
+	EmptyState *DashboardEmptyState         `json:"empty_state,omitempty"`
+}

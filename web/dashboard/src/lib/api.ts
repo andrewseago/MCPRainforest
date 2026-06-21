@@ -1,6 +1,7 @@
 import type {
   DashboardCreateToolGroupInput,
   DashboardDiagnosticsResponse,
+  DashboardMarketplaceResponse,
   DashboardOAuthSessionResponse,
   DashboardOverviewResponse,
   DashboardPromptsResponse,
@@ -46,6 +47,7 @@ export const api = {
   prompts: () => requestJSON<DashboardPromptsResponse>("/api/dashboard/prompts"),
   resources: () => requestJSON<DashboardResourcesResponse>("/api/dashboard/resources"),
   diagnostics: () => requestJSON<DashboardDiagnosticsResponse>("/api/dashboard/diagnostics"),
+  marketplace: () => requestJSON<DashboardMarketplaceResponse>("/api/dashboard/marketplace"),
   registerServer: (body: DashboardRegisterServerInput) =>
     requestJSON<DashboardRegisterServerResponse>("/api/dashboard/servers", {
       method: "POST",
