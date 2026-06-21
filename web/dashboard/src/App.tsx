@@ -2849,7 +2849,7 @@ export default function App() {
                   />
                 ) : (
                   <div className="tools-table-wrap">
-                    <table className="data-table compact-table prompts-table">
+                    <table className="data-table compact-table prompts-table prompt-templates-table">
                       <thead>
                         <tr>
                           <th aria-hidden="true" className="expand-column"></th>

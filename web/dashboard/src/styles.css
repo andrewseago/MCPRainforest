@@ -2696,3 +2696,99 @@ html[data-theme="dark"] .modal-backdrop {
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 720px) {
+  .tools-table,
+  .tools-table tbody,
+  .tools-table tr,
+  .tools-table td,
+  .prompt-templates-table,
+  .prompt-templates-table tbody,
+  .prompt-templates-table tr,
+  .prompt-templates-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .tools-table thead,
+  .prompt-templates-table thead {
+    display: none;
+  }
+
+  .tools-table .tool-summary-row,
+  .prompt-templates-table .tool-summary-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 7px 10px;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .tools-table .tool-summary-row:first-child,
+  .prompt-templates-table .tool-summary-row:first-child {
+    border-top: 0;
+  }
+
+  .tools-table .tool-summary-row td,
+  .prompt-templates-table .tool-summary-row td {
+    grid-column: 2;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .tools-table .tool-summary-row td:first-child,
+  .prompt-templates-table .tool-summary-row td:first-child {
+    grid-column: 1;
+    grid-row: 1 / span 6;
+    padding-top: 2px;
+  }
+
+  .tools-table .tool-summary-row td:nth-child(3)::before,
+  .tools-table .tool-summary-row td:nth-child(4)::before,
+  .tools-table .tool-summary-row td:nth-child(6)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(3)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(4)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(6)::before {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
+
+  .tools-table .tool-summary-row td:nth-child(3)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(3)::before {
+    content: "Canonical name";
+  }
+
+  .tools-table .tool-summary-row td:nth-child(4)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(4)::before {
+    content: "Server";
+  }
+
+  .tools-table .tool-summary-row td:nth-child(6)::before,
+  .prompt-templates-table .tool-summary-row td:nth-child(6)::before {
+    content: "Status";
+  }
+
+  .tools-table .tool-summary-row .row-actions,
+  .prompt-templates-table .tool-summary-row .row-actions {
+    margin-top: 4px;
+  }
+
+  .tools-table .tool-expanded-row,
+  .tools-table .tool-expanded-cell,
+  .prompt-templates-table .tool-expanded-row,
+  .prompt-templates-table .tool-expanded-cell {
+    display: block;
+    width: 100%;
+  }
+
+  .tools-table .tool-expanded-cell,
+  .prompt-templates-table .tool-expanded-cell {
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+  }
+}
