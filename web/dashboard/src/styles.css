@@ -2620,3 +2620,17 @@ html[data-theme="dark"] .modal-backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.diagnostic-link {
+  color: var(--accent-deep);
+  word-break: break-all;
+}
+
+.hint-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted-strong);
+  line-height: 1.5;
+}

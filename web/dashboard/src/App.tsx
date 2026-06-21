@@ -3127,8 +3127,56 @@ export default function App() {
                         <code>{diagnostics.enabled_transports.join(", ")}</code>
                       </dd>
                     </div>
+                    {diagnostics.config_source ? (
+                      <div>
+                        <dt>Config source</dt>
+                        <dd>
+                          <code>{diagnostics.config_source}</code>
+                        </dd>
+                      </div>
+                    ) : null}
+                    {diagnostics.config_path ? (
+                      <div>
+                        <dt>Config path</dt>
+                        <dd>
+                          <div className="detail-copy-row">
+                            <code className="detail-target-code">{diagnostics.config_path}</code>
+                            <CopyButton
+                              ariaLabel="Copy config path"
+                              title="Copy config path"
+                              value={diagnostics.config_path}
+                            />
+                          </div>
+                        </dd>
+                      </div>
+                    ) : null}
+                    {diagnostics.metrics_endpoint ? (
+                      <div>
+                        <dt>Metrics endpoint</dt>
+                        <dd>
+                          <a
+                            className="diagnostic-link"
+                            href={diagnostics.metrics_endpoint}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            {diagnostics.metrics_endpoint}
+                          </a>
+                        </dd>
+                      </div>
+                    ) : null}
                   </dl>
                 </SectionCard>
+
+                {diagnostics.troubleshooting_hints.length > 0 ? (
+                  <SectionCard title="Troubleshooting" subtitle="Suggested checks">
+                    <ul className="hint-list">
+                      {diagnostics.troubleshooting_hints.map((hint) => (
+                        <li key={hint}>{hint}</li>
+                      ))}
+                    </ul>
+                  </SectionCard>
+                ) : null}
               </>
             ) : null}
           </div>
