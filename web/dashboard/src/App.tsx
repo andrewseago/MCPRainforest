@@ -242,6 +242,17 @@ function toolDescription(tool: DashboardTool) {
   return tool.description || "No description";
 }
 
+const annotationLabels: Record<string, { label: string; tone: "good" | "warn" | "muted" }> = {
+  readOnlyHint: { label: "Read-only", tone: "good" },
+  destructiveHint: { label: "Destructive", tone: "warn" },
+  idempotentHint: { label: "Idempotent", tone: "muted" },
+  openWorldHint: { label: "Open-world", tone: "muted" },
+};
+
+function annotationBadge(key: string): { label: string; tone: "good" | "warn" | "muted" } {
+  return annotationLabels[key] ?? { label: key, tone: "muted" };
+}
+
 function promptDescription(prompt: DashboardPrompt) {
   return prompt.description || "No description";
 }
@@ -2425,6 +2436,18 @@ export default function App() {
                                 </td>
                                 <td>
                                   <div className="table-primary">{tool.name}</div>
+                                  {tool.annotation_keys && tool.annotation_keys.length > 0 ? (
+                                    <div className="annotation-row">
+                                      {tool.annotation_keys.map((key) => {
+                                        const badge = annotationBadge(key);
+                                        return (
+                                          <span className={`annotation-badge tone-${badge.tone}`} key={key}>
+                                            {badge.label}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
                                 </td>
                                 <td>
                                   <code className="identifier-code" title={tool.canonical_name}>
@@ -2488,6 +2511,13 @@ export default function App() {
                                           <dd>{toolDescription(tool)}</dd>
                                         </div>
                                       </dl>
+
+                                      {tool.input_preview ? (
+                                        <p className="detail-preview">
+                                          <span className="detail-preview-label">Signature</span>
+                                          <code>{tool.input_preview}</code>
+                                        </p>
+                                      ) : null}
 
                                       <div className="tool-schema-section">
                                         <div className="tool-schema-header">
