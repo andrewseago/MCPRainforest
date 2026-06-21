@@ -4,21 +4,16 @@ import { api } from "@/lib/api";
 import type {
   AppSection,
   DashboardCreateToolGroupInput,
-  DashboardDiagnosticsResponse,
+  DashboardData,
   DashboardOAuthAuthorizationRequired,
-  DashboardOverviewResponse,
   DashboardPrompt,
-  DashboardPromptsResponse,
   DashboardRegisterServerInput,
   DashboardResource,
-  DashboardResourcesResponse,
   DashboardServer,
-  DashboardServersResponse,
   DashboardToolGroup,
-  DashboardToolGroupsResponse,
   DashboardTool,
-  DashboardToolsResponse,
 } from "@/lib/types";
+import { applyPreviewData } from "@/lib/previewData";
 import { CopyButton } from "@/components/CopyButton";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
 import { NavSidebar } from "@/components/NavSidebar";
@@ -42,16 +37,7 @@ function TrashIcon() {
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type FeedbackTone = "success" | "error";
-
-interface DashboardData {
-  overview?: DashboardOverviewResponse;
-  servers?: DashboardServersResponse;
-  tools?: DashboardToolsResponse;
-  toolGroups?: DashboardToolGroupsResponse;
-  prompts?: DashboardPromptsResponse;
-  resources?: DashboardResourcesResponse;
-  diagnostics?: DashboardDiagnosticsResponse;
-}
+type ThemeMode = "light" | "dark" | "system";
 
 interface FeedbackMessage {
   tone: FeedbackTone;
@@ -101,27 +87,27 @@ interface SchemaFieldSummary {
 const sectionMeta: Record<AppSection, { title: string; subtitle: string }> = {
   servers: {
     title: "Servers",
-    subtitle: "",
+    subtitle: "Registered upstream MCP servers and connection state.",
   },
   tools: {
     title: "Tools",
-    subtitle: "All discovered tools across registered servers.",
+    subtitle: "Search, inspect, copy, enable, and disable discovered tools.",
   },
   tool_groups: {
     title: "Tool Groups",
-    subtitle: "",
+    subtitle: "Curated MCP endpoints for focused client access.",
   },
   prompts: {
     title: "Prompts",
-    subtitle: "Prompt templates currently exposed through MCPJungle.",
+    subtitle: "Prompt templates currently exposed through the gateway.",
   },
   resources: {
     title: "Resources",
-    subtitle: "Resources registered and proxied through the gateway.",
+    subtitle: "Registered resources and canonical gateway URIs.",
   },
   diagnostics: {
     title: "System Info",
-    subtitle: "",
+    subtitle: "Runtime, version, endpoint, and transport details.",
   },
 };
 
@@ -453,12 +439,93 @@ function createInitialToolGroupForm(): ToolGroupFormState {
   };
 }
 
+const themeModes: ThemeMode[] = ["light", "dark", "system"];
+
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+function initialThemeMode(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "system";
+  }
+  const stored = window.localStorage.getItem("mcpjungle-dashboard-theme");
+  return isThemeMode(stored) ? stored : "system";
+}
+
+function resolvedTheme(mode: ThemeMode) {
+  if (mode !== "system") {
+    return mode;
+  }
+  if (typeof window === "undefined") {
+    return "light";
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function healthTone(status?: string) {
+  if (status === "running" || status === "connected" || status === "reachable") {
+    return "good" as const;
+  }
+  if (status === "failed") {
+    return "bad" as const;
+  }
+  return "warn" as const;
+}
+
+function serverStatusLabel(status?: string) {
+  if (!status) {
+    return "unknown";
+  }
+  return status.split("_").join(" ");
+}
+
+function modeLabel(mode: ThemeMode) {
+  if (mode === "system") {
+    return "Auto";
+  }
+  return mode[0].toUpperCase() + mode.slice(1);
+}
+
+function compactServerMode(mode?: string) {
+  if (mode === "development") {
+    return "dev";
+  }
+  return mode || "unknown";
+}
+
+function ThemeModeControl({
+  value,
+  onChange,
+}: {
+  value: ThemeMode;
+  onChange: (mode: ThemeMode) => void;
+}) {
+  return (
+    <div className="theme-toggle" aria-label="Color theme">
+      {themeModes.map((mode) => (
+        <button
+          aria-pressed={value === mode}
+          className={value === mode ? "is-active" : ""}
+          key={mode}
+          onClick={() => onChange(mode)}
+          type="button"
+        >
+          {modeLabel(mode)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [section, setSection] = useState<AppSection>("servers");
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [feedback, setFeedback] = useState<FeedbackMessage | null>(null);
   const [data, setData] = useState<DashboardData>({});
+  const [usingPreviewData, setUsingPreviewData] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(initialThemeMode);
   const [serverFilter, setServerFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
   const [toolServerFilter, setToolServerFilter] = useState("all");
@@ -493,15 +560,20 @@ export default function App() {
         api.resources(),
         api.diagnostics(),
       ]);
-      setData({ overview, servers, tools, toolGroups, prompts, resources, diagnostics });
+      const prepared = applyPreviewData({ overview, servers, tools, toolGroups, prompts, resources, diagnostics });
+      setData(prepared.data);
+      setUsingPreviewData(prepared.usingPreviewData);
+      const preparedTools = prepared.data.tools?.tools ?? [];
+      const preparedToolGroups = prepared.data.toolGroups?.tool_groups ?? [];
+      const preparedPrompts = prepared.data.prompts?.prompts ?? [];
       setExpandedTool((current) =>
-        current && tools.tools.some((tool) => tool.canonical_name === current) ? current : null,
+        current && preparedTools.some((tool) => tool.canonical_name === current) ? current : null,
       );
       setExpandedToolGroup((current) =>
-        current && toolGroups.tool_groups.some((group) => group.name === current) ? current : null,
+        current && preparedToolGroups.some((group) => group.name === current) ? current : null,
       );
       setExpandedPrompt((current) =>
-        current && prompts.prompts.some((prompt) => prompt.canonical_name === current) ? current : null,
+        current && preparedPrompts.some((prompt) => prompt.canonical_name === current) ? current : null,
       );
       setLoadState("ready");
     } catch (error) {
@@ -514,6 +586,27 @@ export default function App() {
   useEffect(() => {
     void loadDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      document.documentElement.dataset.theme = resolvedTheme(themeMode);
+      document.documentElement.dataset.themeMode = themeMode;
+      window.localStorage.setItem("mcpjungle-dashboard-theme", themeMode);
+    };
+
+    applyTheme();
+    if (themeMode !== "system") {
+      return;
+    }
+
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [themeMode]);
 
   const filteredServers = useMemo(() => {
     const servers = data.servers?.servers ?? [];
@@ -588,6 +681,61 @@ export default function App() {
   const overview = data.overview;
   const diagnostics = data.diagnostics;
   const currentSectionMeta = sectionMeta[section];
+  const serverRows = data.servers?.servers ?? [];
+  const primaryEndpoint = overview?.endpoints[0];
+  const enabledServerCount = useMemo(
+    () => serverRows.filter((server) => server.enabled).length,
+    [serverRows],
+  );
+  const attentionServerCount = useMemo(
+    () => serverRows.filter((server) => server.status === "failed" || !server.enabled).length,
+    [serverRows],
+  );
+  const transportSummary = useMemo(() => {
+    const transports = new Set(serverRows.map((server) => transportLabel(server.transport)));
+    return Array.from(transports).sort().join(", ") || "none";
+  }, [serverRows]);
+  const recentServers = useMemo(
+    () =>
+      [...serverRows]
+        .sort((left, right) =>
+          (right.last_discovered_at ?? right.updated_at ?? "").localeCompare(
+            left.last_discovered_at ?? left.updated_at ?? "",
+          ),
+        )
+        .slice(0, 4),
+    [serverRows],
+  );
+  const quickCommands = useMemo(
+    () => [
+      "mcpjungle list servers",
+      "mcpjungle list tools",
+      primaryEndpoint?.url
+        ? `mcpjungle create mcp-client codex --allow-list ${serverRows
+            .filter((server) => server.enabled)
+            .slice(0, 2)
+            .map((server) => server.name)
+            .join(",") || "context7"}`
+        : "mcpjungle create mcp-client codex --allow-list context7",
+    ],
+    [primaryEndpoint?.url, serverRows],
+  );
+  const navCounts = useMemo<Partial<Record<AppSection, number>>>(
+    () => ({
+      servers: overview?.server_count,
+      tools: overview?.tool_count,
+      tool_groups: data.toolGroups?.tool_groups.length,
+      prompts: overview?.prompt_count,
+      resources: overview?.resource_count,
+    }),
+    [
+      data.toolGroups?.tool_groups.length,
+      overview?.prompt_count,
+      overview?.resource_count,
+      overview?.server_count,
+      overview?.tool_count,
+    ],
+  );
 
   function setBusy(key: string, value: boolean) {
     setBusyKeys((current) => {
@@ -924,24 +1072,31 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <NavSidebar active={section} logoUrl={logoUrl} onSelect={setSection} />
+      <NavSidebar active={section} counts={navCounts} logoUrl={logoUrl} onSelect={setSection} />
       <main className="main-shell">
         <header className="topbar">
           <div>
+            <div className="topbar-status-row">
+              {overview?.status ? (
+                <StatusBadge text={serverStatusLabel(overview.status)} tone={healthTone(overview.status)} />
+              ) : null}
+              {usingPreviewData ? <span className="preview-chip">Sample data</span> : null}
+            </div>
             <h1>{currentSectionMeta.title}</h1>
             {currentSectionMeta.subtitle ? (
               <p className="topbar-subtitle">{currentSectionMeta.subtitle}</p>
             ) : null}
           </div>
           <div className="topbar-meta">
+            <ThemeModeControl value={themeMode} onChange={setThemeMode} />
             {overview?.version ? (
               <span className="version-chip">{`Server version ${shortVersion(overview.version)}`}</span>
             ) : null}
-            {overview?.endpoints[0] ? (
+            {primaryEndpoint ? (
               <div className="topbar-endpoint">
                 <span className="topbar-endpoint-label">Endpoint</span>
-                <code title={overview.endpoints[0].url}>{overview.endpoints[0].url}</code>
-                <CopyButton ariaLabel="Copy endpoint" title="Copy endpoint" value={overview.endpoints[0].url} />
+                <code title={primaryEndpoint.url}>{primaryEndpoint.url}</code>
+                <CopyButton ariaLabel="Copy endpoint" title="Copy endpoint" value={primaryEndpoint.url} />
               </div>
             ) : null}
           </div>
@@ -974,169 +1129,268 @@ export default function App() {
             {section === "servers" && data.servers ? (
               <>
                 {overview ? (
-                  <section className="dense-metrics-grid">
-                    <div className="metric-card compact-metric">
-                      <span>Servers</span>
-                      <strong>{overview.server_count}</strong>
+                  <section className="gateway-overview">
+                    <div className="panel gateway-primary-panel">
+                      <div className="gateway-primary-copy">
+                        <p className="panel-label">Global MCP endpoint</p>
+                        <div className="gateway-endpoint-line">
+                          <code title={primaryEndpoint?.url}>{primaryEndpoint?.url ?? "Endpoint unavailable"}</code>
+                          {primaryEndpoint ? (
+                            <CopyButton ariaLabel="Copy gateway endpoint" title="Copy gateway endpoint" value={primaryEndpoint.url} />
+                          ) : null}
+                        </div>
+                        <div className="gateway-meta-grid">
+                          <div>
+                            <span>Mode</span>
+                            <strong>{compactServerMode(overview.mode)}</strong>
+                          </div>
+                          <div>
+                            <span>Transports</span>
+                            <strong>{transportSummary}</strong>
+                          </div>
+                          <div>
+                            <span>Version</span>
+                            <strong>{shortVersion(overview.version)}</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <button className="primary-action gateway-add-button" onClick={openRegisterModal} type="button">
+                        + Add Server
+                      </button>
                     </div>
-                    <div className="metric-card compact-metric">
-                      <span>Tools</span>
-                      <strong>{overview.tool_count}</strong>
-                    </div>
-                    <div className="metric-card compact-metric">
-                      <span>Prompts</span>
-                      <strong>{overview.prompt_count}</strong>
-                    </div>
-                    <div className="metric-card compact-metric">
-                      <span>Resources</span>
-                      <strong>{overview.resource_count}</strong>
+
+                    <div className="gateway-metric-grid">
+                      <div className="metric-card compact-metric">
+                        <span>Servers</span>
+                        <strong>{overview.server_count}</strong>
+                      </div>
+                      <div className="metric-card compact-metric">
+                        <span>Enabled</span>
+                        <strong>{enabledServerCount}</strong>
+                      </div>
+                      <div className="metric-card compact-metric">
+                        <span>Attention</span>
+                        <strong>{attentionServerCount}</strong>
+                      </div>
+                      <div className="metric-card compact-metric">
+                        <span>Tools</span>
+                        <strong>{overview.tool_count}</strong>
+                      </div>
+                      <div className="metric-card compact-metric">
+                        <span>Prompts</span>
+                        <strong>{overview.prompt_count}</strong>
+                      </div>
+                      <div className="metric-card compact-metric">
+                        <span>Resources</span>
+                        <strong>{overview.resource_count}</strong>
+                      </div>
                     </div>
                   </section>
                 ) : null}
 
-                <SectionCard
-                  title="Servers"
-                  subtitle="Registered MCP servers"
-                  action={
-                    <div className="toolbar-cluster">
-                      <input
-                        className="table-filter compact-filter"
-                        onChange={(event) => setServerFilter(event.target.value)}
-                        placeholder="Search servers"
-                        value={serverFilter}
-                      />
-                      <button className="primary-action" onClick={openRegisterModal} type="button">
-                        + Add Server
-                      </button>
+                {usingPreviewData ? (
+                  <section className="preview-callout panel">
+                    <strong>Sample inventory</strong>
+                    <span>Real registrations will replace these rows automatically.</span>
+                  </section>
+                ) : null}
+
+                <div className="servers-console-grid">
+                  <section className="panel server-inventory-panel">
+                    <div className="panel-header inventory-header">
+                      <div>
+                        <p className="panel-label">Server inventory</p>
+                        <h3>Registered MCP servers</h3>
+                      </div>
+                      <div className="toolbar-cluster">
+                        <input
+                          className="table-filter compact-filter"
+                          onChange={(event) => setServerFilter(event.target.value)}
+                          placeholder="Search servers"
+                          value={serverFilter}
+                        />
+                        <button className="primary-action" onClick={openRegisterModal} type="button">
+                          + Add Server
+                        </button>
+                      </div>
                     </div>
-                  }
-                >
-                  {data.servers.empty_state && filteredServers.length === 0 ? (
-                    <EmptyStateCard emptyState={data.servers.empty_state} />
-                  ) : (
-                    <div className="server-list compact-server-list">
-                      {filteredServers.map((server) => {
-                        const expanded = expandedServer === server.name;
-                        return (
-                          <article
-                            className={`server-row compact-server-row ${
-                              server.enabled ? "" : "server-row-disabled"
-                            }`}
-                            key={server.name}
-                          >
-                            <div className="server-row-head compact-server-head">
-                              <div className="server-row-layout">
+
+                    {data.servers.empty_state && filteredServers.length === 0 ? (
+                      <EmptyStateCard emptyState={data.servers.empty_state} />
+                    ) : (
+                      <div className="server-console-list">
+                        {filteredServers.map((server) => {
+                          const expanded = expandedServer === server.name;
+                          const target = server.config_summary.target ?? server.config_summary.command ?? "Unknown";
+                          return (
+                            <article
+                              className={`server-console-row ${server.enabled ? "" : "server-row-disabled"}`}
+                              key={server.name}
+                            >
+                              <div className="server-console-summary">
                                 <button
-                                  className="server-expand-button"
+                                  className="server-main-button"
                                   onClick={() => setExpandedServer(expanded ? null : server.name)}
                                   type="button"
                                 >
-                                  <div className="server-head-main">
-                                    <h3>{server.name}</h3>
-                                    <p>{server.connection_summary}</p>
-                                  </div>
+                                  <span className={`server-status-dot status-${healthTone(server.status)}`} />
+                                  <span className="server-name-stack">
+                                    <strong>{server.name}</strong>
+                                    <code>{target}</code>
+                                  </span>
                                 </button>
-                                <div className="server-row-meta compact-server-meta">
-                                  <div className="server-meta-cell">
-                                    <code>{transportLabel(server.transport)}</code>
+
+                                <div className="server-transport-cell">
+                                  <span>{transportLabel(server.transport)}</span>
+                                  <StatusBadge text={serverStatusLabel(server.status)} tone={healthTone(server.status)} />
+                                </div>
+
+                                <div className="server-count-grid">
+                                  <div>
+                                    <span>Tools</span>
+                                    <strong>{server.tool_count}</strong>
                                   </div>
-                                  <div className="server-meta-cell">
-                                    <StatusBadge
-                                      text={server.enabled ? "Enabled" : "Disabled"}
-                                      tone={server.enabled ? "good" : "muted"}
-                                    />
+                                  <div>
+                                    <span>Prompts</span>
+                                    <strong>{server.prompt_count}</strong>
                                   </div>
-                                  <div className="server-meta-cell server-tool-count">
-                                    <strong>{server.tool_count} tools</strong>
-                                  </div>
-                                  <div className="server-meta-cell">
-                                    <button
-                                      className="secondary-action server-action-button"
-                                      disabled={isBusy(`server-toggle:${server.name}`)}
-                                      onClick={() => void toggleServerEnabled(server)}
-                                      type="button"
-                                    >
-                                      {isBusy(`server-toggle:${server.name}`)
-                                        ? "Saving..."
-                                        : server.enabled
-                                          ? "Disable"
-                                          : "Enable"}
-                                    </button>
-                                  </div>
-                                  <div className="server-meta-cell">
-                                    <button
-                                      aria-label="Delete server"
-                                      className="danger-action server-action-button icon-button danger-icon-button"
-                                      disabled={isBusy(`server-delete:${server.name}`)}
-                                      onClick={() => void deleteServer(server)}
-                                      title="Delete server"
-                                      type="button"
-                                    >
-                                      <TrashIcon />
-                                    </button>
+                                  <div>
+                                    <span>Resources</span>
+                                    <strong>{server.resource_count}</strong>
                                   </div>
                                 </div>
+
+                                <div className="server-action-cluster">
+                                  <StatusBadge
+                                    text={server.enabled ? "Enabled" : "Disabled"}
+                                    tone={server.enabled ? "good" : "muted"}
+                                  />
+                                  <button
+                                    className="secondary-action server-action-button"
+                                    disabled={usingPreviewData || isBusy(`server-toggle:${server.name}`)}
+                                    onClick={() => void toggleServerEnabled(server)}
+                                    title={usingPreviewData ? "Sample servers cannot be modified" : undefined}
+                                    type="button"
+                                  >
+                                    {isBusy(`server-toggle:${server.name}`)
+                                      ? "Saving..."
+                                      : server.enabled
+                                        ? "Disable"
+                                        : "Enable"}
+                                  </button>
+                                  <button
+                                    aria-label="Delete server"
+                                    className="danger-action server-action-button icon-button danger-icon-button"
+                                    disabled={usingPreviewData || isBusy(`server-delete:${server.name}`)}
+                                    onClick={() => void deleteServer(server)}
+                                    title={usingPreviewData ? "Sample servers cannot be deleted" : "Delete server"}
+                                    type="button"
+                                  >
+                                    <TrashIcon />
+                                  </button>
+                                </div>
                               </div>
+
+                              {expanded ? (
+                                <div className="server-detail">
+                                  {!server.enabled ? (
+                                    <p className="detail-note">
+                                      This server is registered but currently not exposed to MCP clients.
+                                    </p>
+                                  ) : null}
+                                  <dl>
+                                    <div>
+                                      <dt>Target</dt>
+                                      <dd>
+                                        <div className="detail-copy-row">
+                                          <code className="detail-target-code">{target}</code>
+                                          {target !== "Unknown" ? (
+                                            <CopyButton ariaLabel="Copy target" title="Copy target" value={target} />
+                                          ) : null}
+                                        </div>
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Session mode</dt>
+                                      <dd>
+                                        <code>{server.config_summary.session_mode ?? "Unknown"}</code>
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Header keys</dt>
+                                      <dd>
+                                        <code>{server.config_summary.header_keys?.join(", ") || "None"}</code>
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Env keys</dt>
+                                      <dd>
+                                        <code>{server.config_summary.env_keys?.join(", ") || "None"}</code>
+                                      </dd>
+                                    </div>
+                                  </dl>
+                                </div>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+
+                  <aside className="ops-rail">
+                    <section className="panel ops-panel">
+                      <div className="ops-panel-header">
+                        <p className="panel-label">Endpoints</p>
+                        <strong>{overview?.endpoints.length ?? 0}</strong>
+                      </div>
+                      <div className="endpoint-list">
+                        {(overview?.endpoints ?? []).map((endpoint) => (
+                          <div className="endpoint-row compact-endpoint-row" key={`${endpoint.label}-${endpoint.url}`}>
+                            <div>
+                              <span>{endpoint.label}</span>
+                              <code title={endpoint.url}>{endpoint.url}</code>
                             </div>
-                            {expanded ? (
-                              <div className="server-detail">
-                                {!server.enabled ? (
-                                  <p className="detail-note">
-                                    This server is registered but currently not exposed to MCP clients.
-                                  </p>
-                                ) : null}
-                                <dl>
-                                  <div>
-                                    <dt>Target</dt>
-                                    <dd>
-                                      <div className="detail-copy-row">
-                                        <code className="detail-target-code">
-                                          {server.config_summary.target ??
-                                            server.config_summary.command ??
-                                            "Unknown"}
-                                        </code>
-                                        {server.config_summary.target ||
-                                        server.config_summary.command ? (
-                                          <CopyButton
-                                            ariaLabel="Copy target"
-                                            title="Copy target"
-                                            value={
-                                              server.config_summary.target ??
-                                              server.config_summary.command ??
-                                              ""
-                                            }
-                                          />
-                                        ) : null}
-                                      </div>
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt>Session mode</dt>
-                                    <dd>
-                                      <code>{server.config_summary.session_mode ?? "Unknown"}</code>
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt>Header keys</dt>
-                                    <dd>
-                                      <code>{server.config_summary.header_keys?.join(", ") || "None"}</code>
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt>Env keys</dt>
-                                    <dd>
-                                      <code>{server.config_summary.env_keys?.join(", ") || "None"}</code>
-                                    </dd>
-                                  </div>
-                                </dl>
-                              </div>
-                            ) : null}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </SectionCard>
+                            <CopyButton ariaLabel={`Copy ${endpoint.label}`} title={`Copy ${endpoint.label}`} value={endpoint.url} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="panel ops-panel">
+                      <div className="ops-panel-header">
+                        <p className="panel-label">Recent discovery</p>
+                      </div>
+                      <div className="activity-list">
+                        {recentServers.map((server) => (
+                          <div className="activity-row" key={server.name}>
+                            <span className={`server-status-dot status-${healthTone(server.status)}`} />
+                            <div>
+                              <strong>{server.name}</strong>
+                              <span>
+                                {server.tool_count} tools / {server.prompt_count} prompts / {server.resource_count} resources
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="panel ops-panel">
+                      <div className="ops-panel-header">
+                        <p className="panel-label">Quick commands</p>
+                      </div>
+                      <div className="command-list">
+                        {quickCommands.map((command) => (
+                          <div className="command-chip" key={command}>
+                            <code>{command}</code>
+                            <CopyButton ariaLabel="Copy command" title="Copy command" value={command} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </aside>
+                </div>
               </>
             ) : null}
 
@@ -1237,8 +1491,9 @@ export default function App() {
                                     />
                                     <button
                                       className="secondary-action"
-                                      disabled={isBusy(`tool-toggle:${tool.canonical_name}`)}
+                                      disabled={usingPreviewData || isBusy(`tool-toggle:${tool.canonical_name}`)}
                                       onClick={() => void toggleToolEnabled(tool)}
+                                      title={usingPreviewData ? "Sample tools cannot be modified" : undefined}
                                       type="button"
                                     >
                                       {isBusy(`tool-toggle:${tool.canonical_name}`)
@@ -1353,7 +1608,13 @@ export default function App() {
                 title="Configured tool groups"
                 subtitle=""
                 action={
-                  <button className="primary-action" onClick={openToolGroupModal} type="button">
+                  <button
+                    className="primary-action"
+                    disabled={usingPreviewData}
+                    onClick={openToolGroupModal}
+                    title={usingPreviewData ? "Sample tool groups cannot be modified" : undefined}
+                    type="button"
+                  >
                     + Add Tool Group
                   </button>
                 }
@@ -1401,9 +1662,9 @@ export default function App() {
                                     <button
                                       aria-label="Delete tool group"
                                       className="danger-action icon-button danger-icon-button"
-                                      disabled={isBusy(`tool-group-delete:${group.name}`)}
+                                      disabled={usingPreviewData || isBusy(`tool-group-delete:${group.name}`)}
                                       onClick={() => void deleteToolGroup(group)}
-                                      title="Delete tool group"
+                                      title={usingPreviewData ? "Sample tool groups cannot be deleted" : "Delete tool group"}
                                       type="button"
                                     >
                                       <TrashIcon />
@@ -1600,8 +1861,9 @@ export default function App() {
                                     />
                                     <button
                                       className="secondary-action"
-                                      disabled={isBusy(`prompt-toggle:${prompt.canonical_name}`)}
+                                      disabled={usingPreviewData || isBusy(`prompt-toggle:${prompt.canonical_name}`)}
                                       onClick={() => void togglePromptEnabled(prompt)}
+                                      title={usingPreviewData ? "Sample prompts cannot be modified" : undefined}
                                       type="button"
                                     >
                                       {isBusy(`prompt-toggle:${prompt.canonical_name}`)
