@@ -641,6 +641,13 @@ button:disabled {
   font-weight: 650;
 }
 
+.status-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .status-good {
   color: var(--accent-deep);
   background: var(--accent-soft);
@@ -1010,7 +1017,7 @@ button:disabled {
 
 .row-chevron {
   color: var(--muted);
-  transition: transform 120ms ease;
+  transition: transform 140ms ease;
 }
 
 .row-chevron.is-expanded {
