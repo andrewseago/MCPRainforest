@@ -777,6 +777,8 @@ export default function App() {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const { message: announcement, announce } = useAnnounce();
+  const registerTitleId = "register-server-dialog-title";
+  const toolGroupTitleId = "tool-group-dialog-title";
 
   async function loadDashboardData(silent = false) {
     if (!silent) {
@@ -3013,13 +3015,11 @@ export default function App() {
           </div>
         ) : null}
 
-        {toolGroupOpen ? (
-          <div className="modal-backdrop" onClick={closeToolGroupModal} role="presentation">
-            <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
+        <Dialog onClose={closeToolGroupModal} open={toolGroupOpen} titleId={toolGroupTitleId}>
               <div className="modal-header">
                 <div>
                   <p className="panel-label">Tool Groups</p>
-                  <h2>Add Tool Group</h2>
+                  <h2 id={toolGroupTitleId}>Add Tool Group</h2>
                 </div>
                 <button className="secondary-action" onClick={closeToolGroupModal} type="button">
                   Close
@@ -3153,19 +3153,15 @@ export default function App() {
                   {isBusy("tool-group-create") ? "Saving..." : "+ Add Tool Group"}
                 </button>
               </div>
-            </section>
-          </div>
-        ) : null}
+        </Dialog>
 
-        {registerOpen ? (
-          <div className="modal-backdrop" onClick={closeRegisterModal} role="presentation">
-            <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
+        <Dialog onClose={closeRegisterModal} open={registerOpen} titleId={registerTitleId}>
               <div className="modal-header">
                 <div>
                   <p className="panel-label">
                     {registerDraftMode === "marketplace_update_review" ? "Marketplace update" : "Add server"}
                   </p>
-                  <h2>
+                  <h2 id={registerTitleId}>
                     {registerOAuth
                       ? "Complete OAuth authorization"
                       : registerDraftMode === "marketplace_update_review"
@@ -3443,9 +3439,7 @@ export default function App() {
                   </>
                 )}
               </div>
-            </section>
-          </div>
-        ) : null}
+        </Dialog>
         <ConfirmDialog
           busy={confirmBusy}
           confirmLabel={confirmState?.confirmLabel ?? "Confirm"}
