@@ -1617,9 +1617,18 @@ export default function App() {
         ) : null}
 
         {loadState === "loading" ? (
-          <section className="loading-screen panel">
-            <h2>Loading dashboard</h2>
-            <p>Querying local MCPRainforest state, servers, tools, prompts, and resources.</p>
+          <section aria-hidden="true" className="panel skeleton-panel">
+            <div className="skeleton-line skeleton-line-lg" />
+            <div className="skeleton-line skeleton-line-md" />
+            <div className="skeleton-grid">
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+            </div>
+            <div className="skeleton-line" />
+            <div className="skeleton-line" />
+            <div className="skeleton-line skeleton-line-md" />
           </section>
         ) : null}
 
