@@ -18,6 +18,7 @@ import type {
 import { applyPreviewData } from "@/lib/previewData";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
+import { Announcer, useAnnounce } from "@/components/Announcer";
 import { CopyButton } from "@/components/CopyButton";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
 import { NavSidebar } from "@/components/NavSidebar";
@@ -775,6 +776,7 @@ export default function App() {
   const [busyKeys, setBusyKeys] = useState<Record<string, boolean>>({});
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const { message: announcement, announce } = useAnnounce();
 
   async function loadDashboardData(silent = false) {
     if (!silent) {
@@ -817,6 +819,7 @@ export default function App() {
         setFeedback(null);
       }
       setLoadState("ready");
+      announce(silent ? "Dashboard refreshed." : "Dashboard loaded.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       if (silent) {
@@ -825,6 +828,7 @@ export default function App() {
         setErrorMessage(message);
         setLoadState("error");
       }
+      announce(`Dashboard load failed: ${message}`);
     } finally {
       if (silent) {
         setRefreshing(false);
@@ -1133,6 +1137,7 @@ export default function App() {
         marketplaceData ? loadMarketplaceData(true) : Promise.resolve(),
       ]);
       setFeedback({ tone: "success", message: successMessage });
+      announce(successMessage);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Request failed";
       setFeedback({ tone: "error", message });
@@ -1550,6 +1555,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <Announcer message={announcement} />
       <NavSidebar active={section} counts={navCounts} logoUrl={logoUrl} onSelect={setSection} />
       <main className="main-shell">
         <header className="topbar">
