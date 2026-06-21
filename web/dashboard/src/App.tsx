@@ -16,6 +16,8 @@ import type {
   DashboardTool,
 } from "@/lib/types";
 import { applyPreviewData } from "@/lib/previewData";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Dialog } from "@/components/Dialog";
 import { CopyButton } from "@/components/CopyButton";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
 import { NavSidebar } from "@/components/NavSidebar";
@@ -59,6 +61,13 @@ type RegisterDraftMode = "manual" | "marketplace_add" | "marketplace_update_revi
 interface FeedbackMessage {
   tone: FeedbackTone;
   message: string;
+}
+
+interface ConfirmState {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void | Promise<void>;
 }
 
 interface KeyValueRow {
@@ -764,6 +773,8 @@ export default function App() {
   const [toolGroupForm, setToolGroupForm] = useState<ToolGroupFormState>(createInitialToolGroupForm());
   const [toolGroupError, setToolGroupError] = useState("");
   const [busyKeys, setBusyKeys] = useState<Record<string, boolean>>({});
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   async function loadDashboardData(silent = false) {
     if (!silent) {
@@ -1366,23 +1377,25 @@ export default function App() {
     );
   }
 
-  async function deleteServer(server: DashboardServer) {
-    const confirmed = window.confirm(
-      `Delete server "${server.name}"? This removes the registration and all discovered tools, prompts, and resources from MCPRainforest.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    await runMutation(
-      `server-delete:${server.name}`,
-      async () => {
-        await api.deleteServer(server.name);
+  function deleteServer(server: DashboardServer) {
+    setConfirmState({
+      title: `Delete server "${server.name}"?`,
+      message:
+        "This removes the registration and all discovered tools, prompts, and resources from MCPRainforest.",
+      confirmLabel: "Delete server",
+      onConfirm: async () => {
+        await runMutation(
+          `server-delete:${server.name}`,
+          async () => {
+            await api.deleteServer(server.name);
+          },
+          `${server.name} deleted.`,
+        );
+        if (expandedServer === server.name) {
+          setExpandedServer(null);
+        }
       },
-      `${server.name} deleted.`,
-    );
-    if (expandedServer === server.name) {
-      setExpandedServer(null);
-    }
+    });
   }
 
   async function toggleToolEnabled(tool: DashboardTool) {
@@ -1445,21 +1458,24 @@ export default function App() {
     }
   }
 
-  async function deleteToolGroup(group: DashboardToolGroup) {
-    const confirmed = window.confirm(`Delete tool group "${group.name}"?`);
-    if (!confirmed) {
-      return;
-    }
-    await runMutation(
-      `tool-group-delete:${group.name}`,
-      async () => {
-        await api.deleteToolGroup(group.name);
+  function deleteToolGroup(group: DashboardToolGroup) {
+    setConfirmState({
+      title: `Delete tool group "${group.name}"?`,
+      message: "This removes the tool group and its dedicated MCP endpoints.",
+      confirmLabel: "Delete group",
+      onConfirm: async () => {
+        await runMutation(
+          `tool-group-delete:${group.name}`,
+          async () => {
+            await api.deleteToolGroup(group.name);
+          },
+          `${group.name} deleted.`,
+        );
+        if (expandedToolGroup === group.name) {
+          setExpandedToolGroup(null);
+        }
       },
-      `${group.name} deleted.`,
-    );
-    if (expandedToolGroup === group.name) {
-      setExpandedToolGroup(null);
-    }
+    });
   }
 
   function renderMarketplaceAction(entry: DashboardMarketplaceServer) {
@@ -3424,6 +3440,33 @@ export default function App() {
             </section>
           </div>
         ) : null}
+        <ConfirmDialog
+          busy={confirmBusy}
+          confirmLabel={confirmState?.confirmLabel ?? "Confirm"}
+          message={confirmState?.message ?? ""}
+          onCancel={() => {
+            if (confirmBusy) {
+              return;
+            }
+            setConfirmState(null);
+          }}
+          onConfirm={async () => {
+            if (!confirmState) {
+              return;
+            }
+            setConfirmBusy(true);
+            try {
+              await confirmState.onConfirm();
+              setConfirmState(null);
+            } catch {
+              // runMutation already surfaced the error via feedback; keep dialog open.
+            } finally {
+              setConfirmBusy(false);
+            }
+          }}
+          open={confirmState !== null}
+          title={confirmState?.title ?? ""}
+        />
       </main>
     </div>
   );

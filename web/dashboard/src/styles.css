@@ -2438,3 +2438,9 @@ html[data-theme="dark"] .modal-backdrop {
     scroll-behavior: auto !important;
   }
 }
+
+.confirm-message {
+  margin: 0 0 16px;
+  color: var(--muted-strong);
+  line-height: 1.5;
+}
